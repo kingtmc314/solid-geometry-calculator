@@ -1,69 +1,44 @@
 /**
- * SolidViewer — Three.js 3D rendering of prism/pyramid
- * Design: Blueprint style — dark navy background, cyan wireframe, orange highlights
- * Mobile-friendly: uses ResizeObserver for responsive canvas
+ * SolidViewer — Three.js 3D rendering
+ * Features:
+ * - Click a face to select it (first click = face A, second = face B)
+ * - Dihedral helper: shared edge highlighted, normal arrows, angle arc
+ * - Elegant white/light tech theme background
+ * - Each face has its own colour
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import type { Face, Point2D, SolidType } from "@/lib/geometry";
-import { buildSolid } from "@/lib/geometry";
+import type { Face3D, NamedPoint, SolidType } from "@/lib/geometry";
+import { getFaceColor, dihedralArcInfo } from "@/lib/geometry";
 
 interface SolidViewerProps {
-  base: Point2D[];
+  points: NamedPoint[];
   solidType: SolidType;
   height: number;
-  highlightFaces?: number[];
-  faces: Face[];
-  /** Localised face label resolver */
-  getFaceLabel: (face: Face) => string;
+  apexLabel: string;
+  faces: Face3D[];
+  highlightFaceIndices: number[];
+  onFaceClick?: (faceIndex: number) => void;
 }
 
-function buildThreeGeometry(
-  base: Point2D[],
-  solidType: SolidType,
-  height: number
-): THREE.BufferGeometry {
-  const { baseVertices, topVertices } = buildSolid(base, solidType, height);
-  const n = base.length;
+// Our coord system → Three.js: (x, y, z) → (x, z, -y)
+function toThree(p: { x: number; y: number; z: number }): THREE.Vector3 {
+  return new THREE.Vector3(p.x, p.z, -p.y);
+}
 
+function buildFaceGeometry(
+  verts: { x: number; y: number; z: number }[]
+): THREE.BufferGeometry {
   const positions: number[] = [];
   const indices: number[] = [];
-
-  // Vertices: base first, then top/apex
-  // Three.js uses Y-up; our solid uses Z-up, so map: (x, y, z) → (x, z, -y)
-  const allVerts = [...baseVertices, ...topVertices];
-  allVerts.forEach((v) => positions.push(v.x, v.z, -v.y));
-
-  if (solidType === "prism") {
-    // Bottom face (CW winding when viewed from below → outward normal down)
-    for (let i = 1; i < n - 1; i++) {
-      indices.push(0, i + 1, i);
-    }
-    // Top face
-    const off = n;
-    for (let i = 1; i < n - 1; i++) {
-      indices.push(off, off + i, off + i + 1);
-    }
-    // Lateral quads
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      indices.push(i, j, n + j);
-      indices.push(i, n + j, n + i);
-    }
-  } else {
-    const apexIdx = n;
-    // Bottom face
-    for (let i = 1; i < n - 1; i++) {
-      indices.push(0, i + 1, i);
-    }
-    // Lateral triangles
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      indices.push(i, j, apexIdx);
-    }
+  verts.forEach((v) => {
+    const t = toThree(v);
+    positions.push(t.x, t.y, t.z);
+  });
+  for (let i = 1; i < verts.length - 1; i++) {
+    indices.push(0, i, i + 1);
   }
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setIndex(indices);
@@ -71,13 +46,38 @@ function buildThreeGeometry(
   return geo;
 }
 
+function makeTextSprite(
+  text: string,
+  color: string,
+  fontSize = 24,
+  bgAlpha = 0
+): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 160;
+  canvas.height = 80;
+  const ctx = canvas.getContext("2d")!;
+  if (bgAlpha > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${bgAlpha})`;
+    ctx.roundRect(4, 4, 152, 72, 8);
+    ctx.fill();
+  }
+  ctx.fillStyle = color;
+  ctx.font = `bold ${fontSize}px 'Space Grotesk', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 80, 40);
+  const tex = new THREE.CanvasTexture(canvas);
+  return new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+}
+
 export default function SolidViewer({
-  base,
+  points,
   solidType,
   height,
-  highlightFaces = [],
+  apexLabel,
   faces,
-  getFaceLabel,
+  highlightFaceIndices,
+  onFaceClick,
 }: SolidViewerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -85,6 +85,8 @@ export default function SolidViewer({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const frameRef = useRef<number>(0);
+  // Map mesh uuid → face index for click detection
+  const meshMapRef = useRef<Map<string, number>>(new Map());
 
   // ── Init scene once ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -92,50 +94,41 @@ export default function SolidViewer({
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x060e1a);
+    scene.background = new THREE.Color(0xf8fafc);
     sceneRef.current = scene;
 
-    // Blueprint grid
-    const grid = new THREE.GridHelper(24, 24, 0x112244, 0x0d1a33);
+    // Subtle grid
+    const grid = new THREE.GridHelper(24, 24, 0xdde1e7, 0xeef0f4);
     scene.add(grid);
 
-    // Axes helper (small)
-    const axes = new THREE.AxesHelper(3);
-    scene.add(axes);
-
-    // Camera
-    const w = mount.clientWidth || 500;
-    const h = mount.clientHeight || 400;
-    const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
-    camera.position.set(10, 8, 10);
+    const w = mount.clientWidth || 600;
+    const h = mount.clientHeight || 450;
+    const camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 1000);
+    camera.position.set(12, 9, 12);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(w, h);
+    renderer.shadowMap.enabled = true;
     mount.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Orbit controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.06;
-    controls.minDistance = 2;
-    controls.maxDistance = 60;
     controlsRef.current = controls;
 
-    // Lighting
-    scene.add(new THREE.AmbientLight(0x223355, 1.0));
-    const dir = new THREE.DirectionalLight(0x88ccff, 1.4);
-    dir.position.set(12, 18, 10);
-    scene.add(dir);
-    const fill = new THREE.DirectionalLight(0x334466, 0.5);
-    fill.position.set(-8, 4, -8);
-    scene.add(fill);
+    // Lighting for elegant look
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dir1 = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir1.position.set(15, 20, 10);
+    scene.add(dir1);
+    const dir2 = new THREE.DirectionalLight(0xc7d2fe, 0.4);
+    dir2.position.set(-10, 5, -8);
+    scene.add(dir2);
 
-    // Animate loop
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate);
       controls.update();
@@ -143,7 +136,6 @@ export default function SolidViewer({
     };
     animate();
 
-    // Responsive resize
     const ro = new ResizeObserver(() => {
       if (!mount) return;
       const nw = mount.clientWidth;
@@ -160,116 +152,301 @@ export default function SolidViewer({
       ro.disconnect();
       controls.dispose();
       renderer.dispose();
-      if (mount.contains(renderer.domElement)) {
-        mount.removeChild(renderer.domElement);
-      }
+      if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
   }, []);
 
-  // ── Rebuild solid mesh when data changes ─────────────────────────────────
+  // ── Click handler ────────────────────────────────────────────────────────
+  const handleClick = useCallback(
+    (e: MouseEvent) => {
+      if (!onFaceClick) return;
+      const mount = mountRef.current;
+      const renderer = rendererRef.current;
+      const camera = cameraRef.current;
+      const scene = sceneRef.current;
+      if (!mount || !renderer || !camera || !scene) return;
+
+      const rect = mount.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+
+      const meshes: THREE.Mesh[] = [];
+      scene.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && meshMapRef.current.has(obj.uuid)) {
+          meshes.push(obj);
+        }
+      });
+
+      const hits = raycaster.intersectObjects(meshes, false);
+      if (hits.length > 0) {
+        const faceIdx = meshMapRef.current.get(hits[0].object.uuid);
+        if (faceIdx !== undefined) onFaceClick(faceIdx);
+      }
+    },
+    [onFaceClick]
+  );
+
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+    mount.addEventListener("click", handleClick);
+    return () => mount.removeEventListener("click", handleClick);
+  }, [handleClick]);
+
+  // ── Rebuild solid mesh ───────────────────────────────────────────────────
   useEffect(() => {
     const scene = sceneRef.current;
-    if (!scene || base.length < 3) return;
+    if (!scene || faces.length === 0 || points.length < 3) return;
 
-    // Remove previous solid
+    // Remove old group
     const old = scene.getObjectByName("solidGroup");
     if (old) scene.remove(old);
+    meshMapRef.current.clear();
 
     const group = new THREE.Group();
     group.name = "solidGroup";
 
-    const geo = buildThreeGeometry(base, solidType, height);
+    const isHL = (i: number) => highlightFaceIndices.includes(i);
 
-    // Solid mesh (translucent navy)
-    const solidMat = new THREE.MeshPhongMaterial({
-      color: 0x1a4a7a,
-      transparent: true,
-      opacity: 0.5,
-      side: THREE.DoubleSide,
-      shininess: 80,
-      specular: new THREE.Color(0x4488cc),
-    });
-    group.add(new THREE.Mesh(geo, solidMat));
+    // ── Face meshes ──────────────────────────────────────────────────────
+    faces.forEach((face, fi) => {
+      const color = getFaceColor(fi);
+      const highlighted = isHL(fi);
 
-    // Wireframe (cyan blueprint lines)
-    const wireMat = new THREE.MeshBasicMaterial({
-      color: 0x4dd9f5,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.75,
-    });
-    group.add(new THREE.Mesh(geo.clone(), wireMat));
+      const geo = buildFaceGeometry(face.vertices);
 
-    // Highlighted faces (orange overlay)
-    if (highlightFaces.length > 0) {
-      highlightFaces.forEach((fi) => {
-        const face = faces[fi];
-        if (!face) return;
-        const pts = face.vertices;
-        const hGeo = new THREE.BufferGeometry();
-        const hPos: number[] = [];
-        pts.forEach((v) => hPos.push(v.x, v.z, -v.y));
-        const hIdx: number[] = [];
-        for (let k = 1; k < pts.length - 1; k++) {
-          hIdx.push(0, k, k + 1);
-        }
-        hGeo.setAttribute(
-          "position",
-          new THREE.Float32BufferAttribute(hPos, 3)
-        );
-        hGeo.setIndex(hIdx);
-        const hMat = new THREE.MeshBasicMaterial({
-          color: 0xf5a623,
-          transparent: true,
-          opacity: 0.4,
-          side: THREE.DoubleSide,
-        });
-        group.add(new THREE.Mesh(hGeo, hMat));
-        // Orange wireframe border for highlighted face
-        const hWire = new THREE.LineSegments(
-          new THREE.EdgesGeometry(hGeo),
-          new THREE.LineBasicMaterial({ color: 0xf5a623, linewidth: 2 })
-        );
-        group.add(hWire);
+      const mat = new THREE.MeshPhongMaterial({
+        color: new THREE.Color(color),
+        transparent: true,
+        opacity: highlighted ? 0.72 : 0.28,
+        side: THREE.DoubleSide,
+        shininess: 80,
+        specular: new THREE.Color(0xffffff),
       });
+      const mesh = new THREE.Mesh(geo, mat);
+      meshMapRef.current.set(mesh.uuid, fi);
+      group.add(mesh);
+
+      // Edges
+      const edges = new THREE.EdgesGeometry(geo);
+      const lineMat = new THREE.LineBasicMaterial({
+        color: highlighted ? new THREE.Color(color) : new THREE.Color(color),
+        linewidth: highlighted ? 2 : 1,
+        transparent: true,
+        opacity: highlighted ? 1 : 0.6,
+      });
+      group.add(new THREE.LineSegments(edges, lineMat));
+
+      // Face label at centroid
+      const nv = face.vertices.length;
+      const cx = face.vertices.reduce((s, v) => s + v.x, 0) / nv;
+      const cy = face.vertices.reduce((s, v) => s + v.y, 0) / nv;
+      const cz = face.vertices.reduce((s, v) => s + v.z, 0) / nv;
+      const tp = toThree({ x: cx, y: cy, z: cz });
+      const n = face.normal;
+      const offset = 0.3;
+      const sprite = makeTextSprite(
+        face.name,
+        highlighted ? color : "#334155",
+        highlighted ? 26 : 20,
+        highlighted ? 0.85 : 0.6
+      );
+      sprite.position.set(
+        tp.x + n.x * offset,
+        tp.y + n.z * offset,
+        tp.z + (-n.y) * offset
+      );
+      sprite.scale.set(1.6, 0.8, 1);
+      group.add(sprite);
+    });
+
+    // ── Vertex labels ────────────────────────────────────────────────────
+    const allVerts: Array<{ pos: { x: number; y: number; z: number }; label: string }> = [];
+    const n = points.length;
+    points.forEach((p) => allVerts.push({ pos: { x: p.x, y: p.y, z: 0 }, label: p.label }));
+    if (solidType === "prism") {
+      points.forEach((p) =>
+        allVerts.push({ pos: { x: p.x, y: p.y, z: height }, label: `${p.label}'` })
+      );
+    } else {
+      const cx = points.reduce((s, p) => s + p.x, 0) / n;
+      const cy = points.reduce((s, p) => s + p.y, 0) / n;
+      allVerts.push({ pos: { x: cx, y: cy, z: height }, label: apexLabel });
     }
 
-    // Vertex sprites
-    const { baseVertices, topVertices } = buildSolid(base, solidType, height);
-    const allV =
-      solidType === "prism"
-        ? [...baseVertices, ...topVertices]
-        : [...baseVertices, topVertices[0]];
-
-    allV.forEach((v, i) => {
-      const isApex = solidType === "pyramid" && i === base.length;
-      const label = isApex ? "A" : `P${i < base.length ? i + 1 : i - base.length + 1}'`;
-      const canvas = document.createElement("canvas");
-      canvas.width = 80;
-      canvas.height = 80;
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = isApex ? "#ff8b94" : "#f5a623";
-      ctx.font = "bold 32px 'JetBrains Mono', monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label, 40, 40);
-      const tex = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: tex, transparent: true })
+    allVerts.forEach(({ pos, label }) => {
+      const tp = toThree(pos);
+      // Small sphere at vertex
+      const sphere = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 12, 12),
+        new THREE.MeshPhongMaterial({ color: 0x334155 })
       );
-      sprite.position.set(v.x, v.z + 0.4, -v.y);
+      sphere.position.copy(tp);
+      group.add(sphere);
+
+      const sprite = makeTextSprite(label, "#1e293b", 28);
+      sprite.position.set(tp.x, tp.y + 0.5, tp.z);
       sprite.scale.set(0.9, 0.9, 1);
       group.add(sprite);
     });
 
+    // ── Dihedral helper lines ────────────────────────────────────────────
+    if (
+      highlightFaceIndices.length === 2 &&
+      highlightFaceIndices[0] !== highlightFaceIndices[1]
+    ) {
+      const fA = faces[highlightFaceIndices[0]];
+      const fB = faces[highlightFaceIndices[1]];
+      const arcInfo = dihedralArcInfo(fA, fB);
+
+      if (arcInfo) {
+        const { arcCenter, armA, armB, sharedVerts, edgeDir } = arcInfo;
+        const armLen = 1.8;
+
+        // Shared edge (thick line)
+        if (sharedVerts.length >= 2) {
+          const edgeGeo = new THREE.BufferGeometry().setFromPoints([
+            toThree(sharedVerts[0]),
+            toThree(sharedVerts[1]),
+          ]);
+          const edgeLine = new THREE.Line(
+            edgeGeo,
+            new THREE.LineBasicMaterial({ color: 0xf59e0b, linewidth: 3 })
+          );
+          group.add(edgeLine);
+        }
+
+        // Normal arrows from arc center
+        const arcCenterV3 = toThree(arcCenter);
+        const colorA = new THREE.Color(getFaceColor(highlightFaceIndices[0]));
+        const colorB = new THREE.Color(getFaceColor(highlightFaceIndices[1]));
+
+        // Arrow for face A normal
+        const arrowA = new THREE.ArrowHelper(
+          new THREE.Vector3(armA.x, armA.z, -armA.y).normalize(),
+          arcCenterV3,
+          armLen,
+          colorA,
+          0.25,
+          0.15
+        );
+        group.add(arrowA);
+
+        // Arrow for face B normal
+        const arrowB = new THREE.ArrowHelper(
+          new THREE.Vector3(armB.x, armB.z, -armB.y).normalize(),
+          arcCenterV3,
+          armLen,
+          colorB,
+          0.25,
+          0.15
+        );
+        group.add(arrowB);
+
+        // Angle arc (dashed circle segment)
+        const angleRad = (arcInfo.angleDeg * Math.PI) / 180;
+        const arcPoints: THREE.Vector3[] = [];
+        const arcRadius = 0.6;
+        const steps = 32;
+        const startVec = new THREE.Vector3(armA.x, armA.z, -armA.y).normalize();
+        const endVec = new THREE.Vector3(armB.x, armB.z, -armB.y).normalize();
+        // Build rotation axis
+        const rotAxis = new THREE.Vector3()
+          .crossVectors(startVec, endVec)
+          .normalize();
+        if (rotAxis.length() > 0.01) {
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const angle = t * angleRad;
+            const v = startVec.clone().applyAxisAngle(rotAxis, angle);
+            arcPoints.push(
+              arcCenterV3.clone().add(v.multiplyScalar(arcRadius))
+            );
+          }
+          const arcGeo = new THREE.BufferGeometry().setFromPoints(arcPoints);
+          group.add(
+            new THREE.Line(
+              arcGeo,
+              new THREE.LineBasicMaterial({
+                color: 0xf59e0b,
+                transparent: true,
+                opacity: 0.9,
+              })
+            )
+          );
+        }
+
+        // Angle label near arc midpoint
+        if (arcPoints.length > 0) {
+          const midArc = arcPoints[Math.floor(arcPoints.length / 2)];
+          const labelSprite = makeTextSprite(
+            `${arcInfo.angleDeg.toFixed(1)}°`,
+            "#f59e0b",
+            22,
+            0.9
+          );
+          labelSprite.position.set(
+            midArc.x + 0.1,
+            midArc.y + 0.2,
+            midArc.z + 0.1
+          );
+          labelSprite.scale.set(1.4, 0.7, 1);
+          group.add(labelSprite);
+        }
+
+        // Dashed perpendicular lines from arc center to each face (helper)
+        const dashMat = new THREE.LineDashedMaterial({
+          color: 0x94a3b8,
+          dashSize: 0.15,
+          gapSize: 0.1,
+          transparent: true,
+          opacity: 0.6,
+        });
+        const dashA = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([
+            arcCenterV3,
+            arcCenterV3
+              .clone()
+              .add(
+                new THREE.Vector3(armA.x, armA.z, -armA.y)
+                  .normalize()
+                  .multiplyScalar(armLen * 1.2)
+              ),
+          ]),
+          dashMat
+        );
+        dashA.computeLineDistances();
+        group.add(dashA);
+
+        const dashB = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([
+            arcCenterV3,
+            arcCenterV3
+              .clone()
+              .add(
+                new THREE.Vector3(armB.x, armB.z, -armB.y)
+                  .normalize()
+                  .multiplyScalar(armLen * 1.2)
+              ),
+          ]),
+          dashMat
+        );
+        dashB.computeLineDistances();
+        group.add(dashB);
+      }
+    }
+
     scene.add(group);
-  }, [base, solidType, height, highlightFaces, faces, getFaceLabel]);
+  }, [points, solidType, height, apexLabel, faces, highlightFaceIndices]);
 
   return (
     <div
       ref={mountRef}
       className="w-full h-full"
-      style={{ minHeight: 280 }}
+      style={{ minHeight: 280, cursor: onFaceClick ? "pointer" : "grab" }}
     />
   );
 }

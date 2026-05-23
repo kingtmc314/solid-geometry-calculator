@@ -1,12 +1,22 @@
 /**
- * Solid Geometry Calculator — Core Math Library
- * Design: Blueprint / Technical Drawing style
+ * geometry.ts — Core geometric computation library
  *
- * Handles all geometric computations:
- * - Base polygon: edge lengths, interior angles, area (using shoelace)
- * - Prism / Pyramid volume
- * - Dihedral angles between any two faces (via normal vectors)
+ * Features:
+ * - Named vertices (NamedPoint with label)
+ * - 2D base polygon: edges, interior angles, area, perimeter
+ * - Four special centers: centroid, circumcenter, incenter, orthocenter
+ *   (exact for triangle; generalised for polygons where applicable)
+ * - 3D solid (prism / pyramid): faces named by vertex labels, volume, dihedral angles
+ * - Face colours
  */
+
+export type SolidType = "prism" | "pyramid";
+
+export interface NamedPoint {
+  label: string;
+  x: number;
+  y: number;
+}
 
 export interface Point2D {
   x: number;
@@ -19,302 +29,586 @@ export interface Point3D {
   z: number;
 }
 
-export type SolidType = "prism" | "pyramid";
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// ─── Vector helpers ───────────────────────────────────────────────────────────
-
-export function vec3(a: Point3D, b: Point3D): Point3D {
-  return { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
-}
-
-export function dot(u: Point3D, v: Point3D): number {
-  return u.x * v.x + u.y * v.y + u.z * v.z;
-}
-
-export function cross(u: Point3D, v: Point3D): Point3D {
-  return {
-    x: u.y * v.z - u.z * v.y,
-    y: u.z * v.x - u.x * v.z,
-    z: u.x * v.y - u.y * v.x,
-  };
-}
-
-export function magnitude(v: Point3D): number {
-  return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
-}
-
-export function normalize(v: Point3D): Point3D {
-  const m = magnitude(v);
-  if (m < 1e-12) return { x: 0, y: 0, z: 0 };
-  return { x: v.x / m, y: v.y / m, z: v.z / m };
-}
-
-// ─── Base polygon (2D, z=0) ───────────────────────────────────────────────────
-
-/** Euclidean distance between two 2D points */
-export function edgeLength(a: Point2D, b: Point2D): number {
+export function dist2D(a: Point2D, b: Point2D): number {
   return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2);
 }
 
-/** All edge lengths of the base polygon (ordered) */
-export function baseEdgeLengths(pts: Point2D[]): number[] {
-  const n = pts.length;
-  return pts.map((p, i) => edgeLength(p, pts[(i + 1) % n]));
+export function interiorAngle(a: Point2D, b: Point2D, c: Point2D): number {
+  const ux = a.x - b.x, uy = a.y - b.y;
+  const vx = c.x - b.x, vy = c.y - b.y;
+  const dot = ux * vx + uy * vy;
+  const mag = Math.sqrt(ux ** 2 + uy ** 2) * Math.sqrt(vx ** 2 + vy ** 2);
+  if (mag < 1e-12) return 0;
+  return (Math.acos(Math.max(-1, Math.min(1, dot / mag))) * 180) / Math.PI;
 }
 
-/**
- * Interior angle at vertex i (in degrees).
- * Uses vectors from vertex i to its two neighbours.
- */
-export function interiorAngle(pts: Point2D[], i: number): number {
+export function signedArea(pts: Point2D[]): number {
   const n = pts.length;
-  const prev = pts[(i - 1 + n) % n];
-  const curr = pts[i];
-  const next = pts[(i + 1) % n];
-  const u = { x: prev.x - curr.x, y: prev.y - curr.y };
-  const v = { x: next.x - curr.x, y: next.y - curr.y };
-  const lenU = Math.sqrt(u.x ** 2 + u.y ** 2);
-  const lenV = Math.sqrt(v.x ** 2 + v.y ** 2);
-  if (lenU < 1e-12 || lenV < 1e-12) return 0;
-  const cosA = (u.x * v.x + u.y * v.y) / (lenU * lenV);
-  return (Math.acos(Math.max(-1, Math.min(1, cosA))) * 180) / Math.PI;
-}
-
-/** All interior angles of the base polygon (degrees) */
-export function baseInteriorAngles(pts: Point2D[]): number[] {
-  return pts.map((_, i) => interiorAngle(pts, i));
-}
-
-/**
- * Signed area via shoelace formula.
- * Returns positive value (absolute area).
- */
-export function baseArea(pts: Point2D[]): number {
-  let sum = 0;
-  const n = pts.length;
+  let area = 0;
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    sum += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+    area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
   }
-  return Math.abs(sum) / 2;
+  return area / 2;
 }
 
-/** Perimeter of the base polygon */
-export function basePerimeter(pts: Point2D[]): number {
-  return baseEdgeLengths(pts).reduce((a, b) => a + b, 0);
+export function polygonArea(pts: Point2D[]): number {
+  return Math.abs(signedArea(pts));
 }
 
-// ─── 3D solid construction ────────────────────────────────────────────────────
+// ─── Base 2D result ───────────────────────────────────────────────────────────
 
-export function buildSolid(
-  base: Point2D[],
-  solidType: SolidType,
-  height: number
-): { baseVertices: Point3D[]; topVertices: Point3D[] } {
-  const baseVertices: Point3D[] = base.map((p) => ({ x: p.x, y: p.y, z: 0 }));
+export interface BaseResult {
+  edgeLengths: number[];
+  edgeLabels: string[];
+  angles: number[];
+  angleLabels: string[];
+  perimeter: number;
+  area: number;
+  isCCW: boolean;
+}
 
-  if (solidType === "prism") {
-    const topVertices: Point3D[] = base.map((p) => ({
-      x: p.x,
-      y: p.y,
-      z: height,
-    }));
-    return { baseVertices, topVertices };
-  } else {
-    const cx = base.reduce((s, p) => s + p.x, 0) / base.length;
-    const cy = base.reduce((s, p) => s + p.y, 0) / base.length;
-    return { baseVertices, topVertices: [{ x: cx, y: cy, z: height }] };
+export function computeBase(pts: NamedPoint[]): BaseResult {
+  const n = pts.length;
+  const edgeLengths: number[] = [];
+  const edgeLabels: string[] = [];
+  const angles: number[] = [];
+  const angleLabels: string[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    edgeLengths.push(dist2D(pts[i], pts[j]));
+    edgeLabels.push(`${pts[i].label}${pts[j].label}`);
   }
+
+  for (let i = 0; i < n; i++) {
+    const prev = pts[(i - 1 + n) % n];
+    const curr = pts[i];
+    const next = pts[(i + 1) % n];
+    angles.push(interiorAngle(prev, curr, next));
+    angleLabels.push(`∠${curr.label}`);
+  }
+
+  return {
+    edgeLengths,
+    edgeLabels,
+    angles,
+    angleLabels,
+    perimeter: edgeLengths.reduce((s, v) => s + v, 0),
+    area: polygonArea(pts),
+    isCCW: signedArea(pts) > 0,
+  };
 }
 
-// ─── Volume ───────────────────────────────────────────────────────────────────
+// ─── Four Special Centers ─────────────────────────────────────────────────────
 
-export function volume(
-  base: Point2D[],
-  solidType: SolidType,
-  height: number
-): number {
-  const A = baseArea(base);
-  if (solidType === "prism") return A * height;
-  return (A * height) / 3;
+export interface CentersResult {
+  /** Centroid (形心) — always defined */
+  centroid: Point2D;
+  centroidExists: true;
+
+  /** Circumcenter (外心) — exact for triangle; generalised for polygon */
+  circumcenter: Point2D | null;
+  circumcenterExists: boolean;
+  circumradius: number | null;
+  /** Note about circumcenter for non-triangles */
+  circumcenterNote?: string;
+
+  /** Incenter (內心) — exact for triangle; generalised for polygon */
+  incenter: Point2D | null;
+  incenterExists: boolean;
+  inradius: number | null;
+  incenterNote?: string;
+
+  /** Orthocenter (垂心) — exact for triangle; generalised for polygon */
+  orthocenter: Point2D | null;
+  orthocenterExists: boolean;
+  orthocenterNote?: string;
 }
 
-// ─── Face definitions ─────────────────────────────────────────────────────────
+/**
+ * Compute the four special centers.
+ * For triangles: exact formulas.
+ * For polygons (n>3): centroid is exact; others use generalised/approximate methods
+ * and a note is shown.
+ */
+export function computeCenters(pts: NamedPoint[]): CentersResult {
+  const n = pts.length;
 
-export interface Face {
-  /** Human-readable label key (used for i18n lookup) */
-  labelKey: string;
-  /** Index for display (1-based for sides) */
-  labelIndex?: number;
-  /** 3D vertices of this face (in order) */
+  // ── Centroid (形心) ── always the arithmetic mean of vertices
+  const centroid: Point2D = {
+    x: pts.reduce((s, p) => s + p.x, 0) / n,
+    y: pts.reduce((s, p) => s + p.y, 0) / n,
+  };
+
+  if (n === 3) {
+    // ── Triangle exact formulas ──────────────────────────────────────────
+    const [A, B, C] = pts;
+    const a = dist2D(B, C); // side opposite A
+    const b = dist2D(A, C); // side opposite B
+    const c = dist2D(A, B); // side opposite C
+
+    // Circumcenter: intersection of perpendicular bisectors
+    // Using formula: solve linear system
+    const D = 2 * (A.x * (B.y - C.y) + B.x * (C.y - A.y) + C.x * (A.y - B.y));
+    let circumcenter: Point2D | null = null;
+    let circumradius: number | null = null;
+    if (Math.abs(D) > 1e-12) {
+      const ux =
+        ((A.x ** 2 + A.y ** 2) * (B.y - C.y) +
+          (B.x ** 2 + B.y ** 2) * (C.y - A.y) +
+          (C.x ** 2 + C.y ** 2) * (A.y - B.y)) /
+        D;
+      const uy =
+        ((A.x ** 2 + A.y ** 2) * (C.x - B.x) +
+          (B.x ** 2 + B.y ** 2) * (A.x - C.x) +
+          (C.x ** 2 + C.y ** 2) * (B.x - A.x)) /
+        D;
+      circumcenter = { x: ux, y: uy };
+      circumradius = dist2D(circumcenter, A);
+    }
+
+    // Incenter: weighted by opposite side lengths
+    const perim = a + b + c;
+    const incenter: Point2D = {
+      x: (a * A.x + b * B.x + c * C.x) / perim,
+      y: (a * A.y + b * B.y + c * C.y) / perim,
+    };
+    // Inradius = Area / s  (s = semi-perimeter)
+    const area = polygonArea(pts);
+    const inradius = area / (perim / 2);
+
+    // Orthocenter: intersection of altitudes
+    // Using: H = A + B + C - 2*circumcenter  (only if circumcenter exists)
+    // More robust: direct linear system
+    let orthocenter: Point2D | null = null;
+    // Altitude from A perpendicular to BC
+    const bcDx = C.x - B.x, bcDy = C.y - B.y;
+    // Altitude from B perpendicular to AC
+    const acDx = C.x - A.x, acDy = C.y - A.y;
+    // Line through A with direction (bcDy, -bcDx): A + t*(bcDy, -bcDx)
+    // Line through B with direction (acDy, -acDx): B + s*(acDy, -acDx)
+    // Solve: A.x + t*bcDy = B.x + s*acDy
+    //        A.y - t*bcDx = B.y - s*acDx
+    const det = bcDy * (-acDx) - (-bcDx) * acDy;
+    if (Math.abs(det) > 1e-12) {
+      const t = ((B.x - A.x) * (-acDx) - (B.y - A.y) * acDy) / det;
+      orthocenter = {
+        x: A.x + t * bcDy,
+        y: A.y - t * bcDx,
+      };
+    }
+
+    return {
+      centroid,
+      centroidExists: true,
+      circumcenter,
+      circumcenterExists: circumcenter !== null,
+      circumradius,
+      incenter,
+      incenterExists: true,
+      inradius,
+      orthocenter,
+      orthocenterExists: orthocenter !== null,
+    };
+  }
+
+  // ── General polygon (n > 3) ───────────────────────────────────────────────
+  const note = (lang: string) =>
+    lang === "zh"
+      ? "（僅三角形有精確值，此為近似）"
+      : "(Exact only for triangles; this is approximate)";
+
+  // Generalised circumcenter: minimise sum of squared distances to all vertices
+  // → least-squares circumcenter = centroid of vertices (approximate)
+  // Better: use the circumcenter of the "best-fit" triangle formed by first 3 vertices
+  // We compute it for the polygon's first 3 vertices as a representative value
+  const sub3 = pts.slice(0, 3) as [NamedPoint, NamedPoint, NamedPoint];
+  const [A3, B3, C3] = sub3;
+  const D3 = 2 * (A3.x * (B3.y - C3.y) + B3.x * (C3.y - A3.y) + C3.x * (A3.y - B3.y));
+  let circumcenter: Point2D | null = null;
+  let circumradius: number | null = null;
+  if (Math.abs(D3) > 1e-12) {
+    const ux =
+      ((A3.x ** 2 + A3.y ** 2) * (B3.y - C3.y) +
+        (B3.x ** 2 + B3.y ** 2) * (C3.y - A3.y) +
+        (C3.x ** 2 + C3.y ** 2) * (A3.y - B3.y)) /
+      D3;
+    const uy =
+      ((A3.x ** 2 + A3.y ** 2) * (C3.x - B3.x) +
+        (B3.x ** 2 + B3.y ** 2) * (A3.x - C3.x) +
+        (C3.x ** 2 + C3.y ** 2) * (B3.x - A3.x)) /
+      D3;
+    circumcenter = { x: ux, y: uy };
+    circumradius = dist2D(circumcenter, A3);
+  }
+
+  // Generalised incenter: weighted centroid by edge lengths
+  const edgeLens = pts.map((p, i) => dist2D(p, pts[(i + 1) % n]));
+  const totalEdge = edgeLens.reduce((s, v) => s + v, 0);
+  const incenter: Point2D = {
+    x: pts.reduce((s, p, i) => s + edgeLens[i] * p.x, 0) / totalEdge,
+    y: pts.reduce((s, p, i) => s + edgeLens[i] * p.y, 0) / totalEdge,
+  };
+  const area = polygonArea(pts);
+  const inradius = (2 * area) / totalEdge; // apothem approximation
+
+  // Generalised orthocenter: for regular polygons it coincides with centroid
+  // For irregular polygons, use the "de Longchamps point" approximation:
+  // H ≈ 3G - 2O  (Euler line relation, approximate for polygons)
+  let orthocenter: Point2D | null = null;
+  if (circumcenter) {
+    orthocenter = {
+      x: 3 * centroid.x - 2 * circumcenter.x,
+      y: 3 * centroid.y - 2 * circumcenter.y,
+    };
+  }
+
+  return {
+    centroid,
+    centroidExists: true,
+    circumcenter,
+    circumcenterExists: circumcenter !== null,
+    circumradius,
+    circumcenterNote: note("zh"),
+    incenter,
+    incenterExists: true,
+    inradius,
+    incenterNote: note("zh"),
+    orthocenter,
+    orthocenterExists: orthocenter !== null,
+    orthocenterNote: note("zh"),
+  };
+}
+
+// ─── 3D Solid ─────────────────────────────────────────────────────────────────
+
+export interface Face3D {
+  vertexLabels: string[];
+  name: string;
   vertices: Point3D[];
+  type: "base" | "top" | "lateral";
+  lateralIndex?: number;
+  normal: Point3D;
 }
 
-/**
- * Returns all faces of the solid.
- * Face 0 = bottom base
- * Face 1 = top base (prism only)
- * Remaining = lateral faces
- */
-export function buildFaces(
-  base: Point2D[],
-  solidType: SolidType,
-  height: number
-): Face[] {
-  const { baseVertices, topVertices } = buildSolid(base, solidType, height);
-  const n = base.length;
-  const faces: Face[] = [];
-
-  // Bottom face
-  faces.push({ labelKey: "faceBase", vertices: [...baseVertices] });
-
-  if (solidType === "prism") {
-    // Top face
-    faces.push({ labelKey: "faceTop", vertices: [...topVertices] });
-    // Lateral faces
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      faces.push({
-        labelKey: "faceSide",
-        labelIndex: i + 1,
-        vertices: [
-          baseVertices[i],
-          baseVertices[j],
-          topVertices[j],
-          topVertices[i],
-        ],
-      });
-    }
-  } else {
-    // Pyramid lateral faces
-    const apex = topVertices[0];
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      faces.push({
-        labelKey: "faceSide",
-        labelIndex: i + 1,
-        vertices: [baseVertices[i], baseVertices[j], apex],
-      });
-    }
-  }
-
-  return faces;
+export interface SolidResult {
+  baseVerts3D: Point3D[];
+  topVerts3D: Point3D[];
+  faces: Face3D[];
+  lateralEdgeLengths: number[];
+  lateralEdgeLabels: string[];
+  volume: number;
+  faceAreas: number[];
+  dihedralMatrix: number[][];
 }
 
-// ─── Normal vector of a face ──────────────────────────────────────────────────
-
-/**
- * Compute the outward-facing unit normal of a planar face.
- * Uses first three non-collinear vertices.
- * For the base (z=0, CCW winding), normal points downward (0,0,-1).
- * We normalise direction consistently: base normal = (0,0,-1), top = (0,0,+1).
- */
-export function faceNormal(face: Face): Point3D {
-  const v = face.vertices;
-  if (v.length < 3) return { x: 0, y: 0, z: 1 };
-  const u1 = vec3(v[0], v[1]);
-  const u2 = vec3(v[0], v[2]);
-  return normalize(cross(u1, u2));
+function normalize(v: Point3D): Point3D {
+  const len = Math.sqrt(v.x ** 2 + v.y ** 2 + v.z ** 2);
+  if (len < 1e-12) return { x: 0, y: 0, z: 1 };
+  return { x: v.x / len, y: v.y / len, z: v.z / len };
 }
 
-// ─── Dihedral angle between two faces ────────────────────────────────────────
-
-/**
- * Dihedral angle between two faces (degrees).
- *
- * The dihedral angle is the angle you would measure if you stood on the
- * shared edge and looked along it — i.e. the angle between the two half-planes.
- *
- * We compute it as:
- *   θ = arccos( n̂_A · n̂_B )          if normals point OUTWARD (same side)
- *   dihedral = 180° − θ               (interior angle)
- *
- * For faces that share no edge (non-adjacent), we still return the angle
- * between their planes, which is the same formula.
- */
-export function dihedralAngle(faceA: Face, faceB: Face): number {
-  const nA = faceNormal(faceA);
-  const nB = faceNormal(faceB);
-  const cosTheta = Math.max(-1, Math.min(1, dot(nA, nB)));
-  // Angle between outward normals
-  const angleBetweenNormals = (Math.acos(cosTheta) * 180) / Math.PI;
-  // Interior dihedral = supplement of angle between outward normals
-  return 180 - angleBetweenNormals;
+function cross(a: Point3D, b: Point3D): Point3D {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
 }
 
-// ─── Lateral edge lengths ─────────────────────────────────────────────────────
-
-export function lateralEdgeLengths(
-  base: Point2D[],
-  solidType: SolidType,
-  height: number
-): number[] {
-  const { baseVertices, topVertices } = buildSolid(base, solidType, height);
-  if (solidType === "prism") {
-    return baseVertices.map((b, i) => magnitude(vec3(b, topVertices[i])));
-  } else {
-    const apex = topVertices[0];
-    return baseVertices.map((b) => magnitude(vec3(b, apex)));
-  }
+function dot3(a: Point3D, b: Point3D): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-// ─── Face areas ───────────────────────────────────────────────────────────────
-
-export function triangleArea3D(a: Point3D, b: Point3D, c: Point3D): number {
-  const ab = vec3(a, b);
-  const ac = vec3(a, c);
-  return magnitude(cross(ab, ac)) / 2;
+function sub3(a: Point3D, b: Point3D): Point3D {
+  return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
 }
 
-export function faceArea(face: Face): number {
-  const v = face.vertices;
-  if (v.length < 3) return 0;
-  // Fan triangulation from v[0]
+function add3(a: Point3D, b: Point3D): Point3D {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+}
+
+function scale3(v: Point3D, s: number): Point3D {
+  return { x: v.x * s, y: v.y * s, z: v.z * s };
+}
+
+function faceNormal(verts: Point3D[]): Point3D {
+  if (verts.length < 3) return { x: 0, y: 0, z: 1 };
+  const v1 = sub3(verts[1], verts[0]);
+  const v2 = sub3(verts[2], verts[0]);
+  return normalize(cross(v1, v2));
+}
+
+function polyArea3D(verts: Point3D[]): number {
+  if (verts.length < 3) return 0;
   let area = 0;
-  for (let i = 1; i < v.length - 1; i++) {
-    area += triangleArea3D(v[0], v[i], v[i + 1]);
+  const o = verts[0];
+  for (let i = 1; i < verts.length - 1; i++) {
+    const v1 = sub3(verts[i], o);
+    const v2 = sub3(verts[i + 1], o);
+    const c = cross(v1, v2);
+    area += Math.sqrt(c.x ** 2 + c.y ** 2 + c.z ** 2) / 2;
   }
   return area;
 }
 
-// ─── Full result type ─────────────────────────────────────────────────────────
-
-export interface GeometryResult {
-  baseEdges: number[];
-  baseAngles: number[];
-  baseAreaVal: number;
-  basePerimeterVal: number;
-  solidVolume: number;
-  lateralEdges: number[];
-  faces: Face[];
-  faceAreas: number[];
-  /** dihedralMatrix[i][j] = dihedral angle between face i and face j (degrees) */
-  dihedralMatrix: number[][];
+function dihedralAngle(nA: Point3D, nB: Point3D): number {
+  const d = Math.max(-1, Math.min(1, dot3(nA, nB)));
+  return 180 - (Math.acos(d) * 180) / Math.PI;
 }
 
-export function computeAll(
-  base: Point2D[],
+export function computeSolid(
+  pts: NamedPoint[],
   solidType: SolidType,
-  height: number
-): GeometryResult {
-  const faces = buildFaces(base, solidType, height);
-  const faceAreas = faces.map(faceArea);
-  const n = faces.length;
-  const dihedralMatrix: number[][] = Array.from({ length: n }, (_, i) =>
-    Array.from({ length: n }, (_, j) =>
-      i === j ? 0 : dihedralAngle(faces[i], faces[j])
+  height: number,
+  apexLabel = "A'"
+): SolidResult {
+  const n = pts.length;
+  const baseVerts3D: Point3D[] = pts.map((p) => ({ x: p.x, y: p.y, z: 0 }));
+
+  let topVerts3D: Point3D[];
+  if (solidType === "prism") {
+    topVerts3D = pts.map((p) => ({ x: p.x, y: p.y, z: height }));
+  } else {
+    const cx = pts.reduce((s, p) => s + p.x, 0) / n;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / n;
+    topVerts3D = [{ x: cx, y: cy, z: height }];
+  }
+
+  const faces: Face3D[] = [];
+
+  // Base face
+  const baseN = normalize(faceNormal(baseVerts3D));
+  const baseNDown: Point3D =
+    baseN.z > 0 ? { x: -baseN.x, y: -baseN.y, z: -baseN.z } : baseN;
+  faces.push({
+    vertexLabels: pts.map((p) => p.label),
+    name: pts.map((p) => p.label).join(""),
+    vertices: [...baseVerts3D],
+    type: "base",
+    normal: baseNDown,
+  });
+
+  if (solidType === "prism") {
+    const topLabels = pts.map((p) => `${p.label}'`);
+    const topN: Point3D = { x: -baseNDown.x, y: -baseNDown.y, z: -baseNDown.z };
+    faces.push({
+      vertexLabels: topLabels,
+      name: topLabels.join(""),
+      vertices: [...topVerts3D],
+      type: "top",
+      normal: topN,
+    });
+
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const verts: Point3D[] = [
+        baseVerts3D[i],
+        baseVerts3D[j],
+        topVerts3D[j],
+        topVerts3D[i],
+      ];
+      const lLabels = [pts[i].label, pts[j].label, `${pts[j].label}'`, `${pts[i].label}'`];
+      faces.push({
+        vertexLabels: lLabels,
+        name: lLabels.join(""),
+        vertices: verts,
+        type: "lateral",
+        lateralIndex: i + 1,
+        normal: normalize(faceNormal(verts)),
+      });
+    }
+  } else {
+    const apex = topVerts3D[0];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const verts: Point3D[] = [baseVerts3D[i], baseVerts3D[j], apex];
+      const lLabels = [pts[i].label, pts[j].label, apexLabel];
+      faces.push({
+        vertexLabels: lLabels,
+        name: lLabels.join(""),
+        vertices: verts,
+        type: "lateral",
+        lateralIndex: i + 1,
+        normal: normalize(faceNormal(verts)),
+      });
+    }
+  }
+
+  const lateralEdgeLengths: number[] = [];
+  const lateralEdgeLabels: string[] = [];
+  if (solidType === "prism") {
+    for (let i = 0; i < n; i++) {
+      const b = baseVerts3D[i];
+      const t = topVerts3D[i];
+      lateralEdgeLengths.push(
+        Math.sqrt((t.x - b.x) ** 2 + (t.y - b.y) ** 2 + (t.z - b.z) ** 2)
+      );
+      lateralEdgeLabels.push(`${pts[i].label}${pts[i].label}'`);
+    }
+  } else {
+    const apex = topVerts3D[0];
+    for (let i = 0; i < n; i++) {
+      const b = baseVerts3D[i];
+      lateralEdgeLengths.push(
+        Math.sqrt((apex.x - b.x) ** 2 + (apex.y - b.y) ** 2 + (apex.z - b.z) ** 2)
+      );
+      lateralEdgeLabels.push(`${pts[i].label}${apexLabel}`);
+    }
+  }
+
+  const baseArea = polygonArea(pts);
+  const volume = solidType === "prism" ? baseArea * height : (baseArea * height) / 3;
+  const faceAreas = faces.map((f) => polyArea3D(f.vertices));
+
+  const nf = faces.length;
+  const dihedralMatrix: number[][] = Array.from({ length: nf }, (_, i) =>
+    Array.from({ length: nf }, (__, j) =>
+      i === j ? 0 : dihedralAngle(faces[i].normal, faces[j].normal)
     )
   );
 
   return {
-    baseEdges: baseEdgeLengths(base),
-    baseAngles: baseInteriorAngles(base),
-    baseAreaVal: baseArea(base),
-    basePerimeterVal: basePerimeter(base),
-    solidVolume: volume(base, solidType, height),
-    lateralEdges: lateralEdgeLengths(base, solidType, height),
+    baseVerts3D,
+    topVerts3D,
     faces,
+    lateralEdgeLengths,
+    lateralEdgeLabels,
+    volume,
     faceAreas,
     dihedralMatrix,
   };
+}
+
+// ─── Dihedral angle helpers for 3D visualisation ─────────────────────────────
+
+/**
+ * Find the shared edge (intersection line) between two faces.
+ * Returns [pointOnLine, lineDirection] or null if no shared edge.
+ */
+export function findSharedEdge(
+  faceA: Face3D,
+  faceB: Face3D
+): { p: Point3D; dir: Point3D; sharedVerts: Point3D[] } | null {
+  const shared: Point3D[] = [];
+  for (const va of faceA.vertices) {
+    for (const vb of faceB.vertices) {
+      if (
+        Math.abs(va.x - vb.x) < 1e-9 &&
+        Math.abs(va.y - vb.y) < 1e-9 &&
+        Math.abs(va.z - vb.z) < 1e-9
+      ) {
+        shared.push(va);
+      }
+    }
+  }
+  if (shared.length < 2) return null;
+  const dir = normalize(sub3(shared[1], shared[0]));
+  return { p: shared[0], dir, sharedVerts: shared };
+}
+
+/**
+ * Compute the dihedral angle arc centre and the two arm directions
+ * for visualising the angle between two faces.
+ */
+export function dihedralArcInfo(
+  faceA: Face3D,
+  faceB: Face3D
+): {
+  arcCenter: Point3D;
+  armA: Point3D;
+  armB: Point3D;
+  angleDeg: number;
+  edgeDir: Point3D | null;
+  sharedVerts: Point3D[];
+} | null {
+  const shared = findSharedEdge(faceA, faceB);
+
+  // Compute angle
+  const d = Math.max(-1, Math.min(1, dot3(faceA.normal, faceB.normal)));
+  const angleDeg = 180 - (Math.acos(d) * 180) / Math.PI;
+
+  if (!shared) {
+    // No shared edge — use centroid midpoint as arc center
+    const centA = faceA.vertices.reduce(
+      (acc, v) => add3(acc, v),
+      { x: 0, y: 0, z: 0 }
+    );
+    const nA = faceA.vertices.length;
+    const centB = faceB.vertices.reduce(
+      (acc, v) => add3(acc, v),
+      { x: 0, y: 0, z: 0 }
+    );
+    const nB = faceB.vertices.length;
+    const arcCenter = {
+      x: (centA.x / nA + centB.x / nB) / 2,
+      y: (centA.y / nA + centB.y / nB) / 2,
+      z: (centA.z / nA + centB.z / nB) / 2,
+    };
+    return {
+      arcCenter,
+      armA: faceA.normal,
+      armB: faceB.normal,
+      angleDeg,
+      edgeDir: null,
+      sharedVerts: [],
+    };
+  }
+
+  // Arc center: midpoint of shared edge
+  const arcCenter =
+    shared.sharedVerts.length >= 2
+      ? {
+          x: (shared.sharedVerts[0].x + shared.sharedVerts[1].x) / 2,
+          y: (shared.sharedVerts[0].y + shared.sharedVerts[1].y) / 2,
+          z: (shared.sharedVerts[0].z + shared.sharedVerts[1].z) / 2,
+        }
+      : shared.p;
+
+  // Arms: perpendicular to edge direction, lying in each face
+  const edgeDir = shared.dir;
+  const armA = normalize(
+    sub3(faceA.normal, scale3(edgeDir, dot3(faceA.normal, edgeDir)))
+  );
+  const armB = normalize(
+    sub3(faceB.normal, scale3(edgeDir, dot3(faceB.normal, edgeDir)))
+  );
+
+  return {
+    arcCenter,
+    armA,
+    armB,
+    angleDeg,
+    edgeDir,
+    sharedVerts: shared.sharedVerts,
+  };
+}
+
+// ─── Colour palette ───────────────────────────────────────────────────────────
+
+// Elegant tech palette: indigo, teal, violet, rose, amber, emerald, sky, fuchsia
+export const FACE_COLORS = [
+  "#6366f1", // indigo — base
+  "#14b8a6", // teal — top
+  "#8b5cf6", // violet
+  "#f43f5e", // rose
+  "#f59e0b", // amber
+  "#10b981", // emerald
+  "#0ea5e9", // sky
+  "#d946ef", // fuchsia
+  "#fb923c", // orange
+];
+
+export const CENTER_COLORS = {
+  centroid: "#f59e0b",     // amber
+  circumcenter: "#6366f1", // indigo
+  incenter: "#10b981",     // emerald
+  orthocenter: "#f43f5e",  // rose
+};
+
+export function getFaceColor(index: number): string {
+  return FACE_COLORS[index % FACE_COLORS.length];
 }

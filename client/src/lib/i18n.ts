@@ -1,6 +1,5 @@
 /**
  * i18n — Chinese / English translations
- * Design: Blueprint / Technical Drawing
  */
 
 export type Lang = "zh" | "en";
@@ -12,21 +11,81 @@ export const translations = {
     appSubtitle: "Solid Geometry Calculator",
     langSwitch: "English",
 
-    // Solid type & height
-    sectionSolidType: "立體類型 & 高度",
+    // Two-step flow
+    step1Label: "第一步：底面",
+    step2Label: "第二步：立體",
+    step1Desc: "設定底面頂點，查看 2D 圖及計算結果",
+    step2Desc: "選擇立體類型，查看 3D 視圖及計算結果",
+    btnToStep2: "升成立體 →",
+    btnBackStep1: "← 返回底面",
+
+    // Vertex setup
+    sectionVertices: "底面頂點",
+    labelVertexName: "名稱",
+    labelX: "x",
+    labelY: "y",
+    tooltipAddPoint: "新增頂點（最多 6 個）",
+    tooltipRemovePoint: "移除此頂點",
+    tooltipReset: "重設為預設值",
+    hintBase: "底面在 z=0 平面，頂點按順序排列",
+    hintVertexName: "可自由命名，如 A、B、P₁",
+    presetTriangle: "三角形",
+    presetSquare: "正方形",
+    presetPentagon: "五邊形",
+    presetHexagon: "六邊形",
+
+    // Solid type
+    sectionSolidType: "立體設定",
     labelType: "類型",
-    labelHeight: "高度",
+    labelHeight: "高度 h",
+    labelApexLabel: "頂點名稱",
     optPrism: "柱體",
     optPyramid: "錐體",
-    unitHeight: "單位",
 
-    // Base vertices
-    sectionBaseVerts: "底面頂點",
-    tooltipReset: "重設預設值",
-    tooltipAddPoint: "新增頂點（最多 6 個）",
-    hintBase: "底面在 z=0 平面，頂點按順序排列",
-    labelX: "x 座標",
-    labelY: "y 座標",
+    // 2D results tabs
+    tab2DEdges: "邊長",
+    tab2DAngles: "角度",
+    tab2DArea: "面積",
+    tab2DCenters: "四心",
+    labelPerimeter: "周長",
+    labelAngleSum: "角度和",
+    labelArea: "面積",
+    unitLength: "",
+    unitDeg: "°",
+    unitAreaSq: "平方單位",
+    formulaArea: "（鞋帶公式）",
+
+    // Four centers
+    sectionCenters: "特殊中心",
+    centerCentroid: "形心 G",
+    centerCircumcenter: "外心 O",
+    centerIncenter: "內心 I",
+    centerOrthocenter: "垂心 H",
+    centerCentroidDesc: "各頂點坐標的算術平均值",
+    centerCircumcenterDesc: "外接圓圓心，到各頂點等距",
+    centerIncenterDesc: "內切圓圓心，到各邊等距",
+    centerOrthocenterDesc: "各頂點到對邊垂線的交點",
+    showCircumcircle: "外接圓",
+    showIncircle: "內切圓",
+    circumradius: "外接圓半徑",
+    inradius: "內切圓半徑",
+    coordLabel: "坐標",
+    centerNote: "（三角形有精確值；多邊形為近似）",
+    centerNoteTriangle: "（三角形精確計算）",
+
+    // 3D results tabs
+    tabVolume: "體積",
+    tabFaces: "各面",
+    tabDihedralMatrix: "交角矩陣",
+    labelVolume: "體積",
+    unitVolCube: "立方單位",
+    formulaPrism: "V = 底面積 × h",
+    formulaPyramid: "V = ⅓ × 底面積 × h",
+    labelBaseArea: "底面積",
+    labelHeightH: "高度 h",
+    labelLateralEdges: "側稜",
+    labelFaceArea: "面積",
+    unitFaceVerts: "頂點",
 
     // Dihedral
     sectionDihedral: "平面交角",
@@ -34,138 +93,123 @@ export const translations = {
     labelPlaneB: "平面 B",
     dihedralAngle: "交角",
     dihedralRad: "弧度",
-    dihedralHint: "請選擇兩個不同平面",
+    dihedralHint: "請選擇兩個不同的平面",
+    dihedralMatrixHint: "點擊任意格子可直接選取對應的兩個平面",
+    dihedralClickHint: "可在右側 3D 圖點擊兩個面來選取",
+    colFace: "平面",
 
-    // Tabs
-    tabBase: "底面",
-    tabSolid: "立體",
-    tabFaces: "各面",
-    tabDihedralMatrix: "交角矩陣",
+    // Viewer
+    viewerHint: "拖曳旋轉 · 滾輪縮放 · 右鍵平移 · 點擊面選取交角",
+    viewerNeedPoints: "請先設定至少 3 個頂點",
+    viewerClickFaceHint: "點擊第一個面…",
+    viewerClickFace2Hint: "點擊第二個面…",
+    viewerFaceSelected: "已選取：",
 
-    // Base results
-    cardEdgeLengths: "邊長",
-    labelPerimeter: "周長",
-    unitLength: "單位",
-    cardAngles: "內角",
-    labelAngleSum: "角度和",
-    unitDeg: "°",
-    cardArea: "底面積",
-    unitAreaSq: "平方單位",
-    formulaArea: "（梯形公式）",
+    // Canvas 2D
+    canvas2DHint: "可拖曳頂點調整位置",
+    canvas2DGrid: "顯示格線",
 
-    // Solid results
-    cardVolume: "體積",
-    unitVolCube: "立方單位",
-    formulaPrism: "V = A × h",
-    formulaPyramid: "V = ⅓ × A × h",
-    labelBaseArea: "底面積 A",
-    labelHeightH: "高度 h",
-    cardLateralEdges: "側稜長",
-    labelLateralEdgePrism: "側稜",
-    labelLateralEdgePyramid: "斜稜",
-
-    // Faces
-    cardFaceArea: "面積",
-    unitFaceVerts: "頂點",
-
-    // Dihedral matrix
-    dihedralMatrixHint: "任意兩平面之間的交角（度數）。對角線為 0°（同一平面）。",
-    colFace: "面 / 面",
-
-    // Face labels
-    faceBase: "底面",
-    faceTop: "頂面",
-    faceSide: "側面",
-    faceApex: "頂點 A",
-
-    // Viewer hint
-    viewerHint: "拖曳旋轉 · 滾輪縮放 · 右鍵平移",
-    viewerNeedPoints: "請至少輸入 3 個底面頂點",
-
-    // Status bar
+    // Status
     statusPoints: "點",
     statusPrism: "柱體",
     statusPyramid: "錐體",
   },
 
   en: {
-    // App header
     appTitle: "Solid Geometry Calculator",
     appSubtitle: "立體幾何計算器",
     langSwitch: "中文",
 
-    // Solid type & height
-    sectionSolidType: "Solid Type & Height",
+    step1Label: "Step 1: Base",
+    step2Label: "Step 2: Solid",
+    step1Desc: "Set base vertices, view 2D diagram and calculations",
+    step2Desc: "Choose solid type, view 3D model and calculations",
+    btnToStep2: "Build Solid →",
+    btnBackStep1: "← Back to Base",
+
+    sectionVertices: "Base Vertices",
+    labelVertexName: "Name",
+    labelX: "x",
+    labelY: "y",
+    tooltipAddPoint: "Add vertex (max 6)",
+    tooltipRemovePoint: "Remove vertex",
+    tooltipReset: "Reset to default",
+    hintBase: "Base lies in z=0 plane, vertices in order",
+    hintVertexName: "Custom labels, e.g. A, B, P₁",
+    presetTriangle: "Triangle",
+    presetSquare: "Square",
+    presetPentagon: "Pentagon",
+    presetHexagon: "Hexagon",
+
+    sectionSolidType: "Solid Settings",
     labelType: "Type",
-    labelHeight: "Height",
+    labelHeight: "Height h",
+    labelApexLabel: "Apex label",
     optPrism: "Prism",
     optPyramid: "Pyramid",
-    unitHeight: "units",
 
-    // Base vertices
-    sectionBaseVerts: "Base Vertices",
-    tooltipReset: "Reset to defaults",
-    tooltipAddPoint: "Add vertex (max 6)",
-    hintBase: "Base lies in z=0 plane; vertices in order",
-    labelX: "x coord",
-    labelY: "y coord",
+    tab2DEdges: "Edges",
+    tab2DAngles: "Angles",
+    tab2DArea: "Area",
+    tab2DCenters: "Centers",
+    labelPerimeter: "Perimeter",
+    labelAngleSum: "Angle sum",
+    labelArea: "Area",
+    unitLength: "",
+    unitDeg: "°",
+    unitAreaSq: "sq. units",
+    formulaArea: "(Shoelace formula)",
 
-    // Dihedral
-    sectionDihedral: "Dihedral Angle",
+    // Four centers
+    sectionCenters: "Special Centers",
+    centerCentroid: "Centroid G",
+    centerCircumcenter: "Circumcenter O",
+    centerIncenter: "Incenter I",
+    centerOrthocenter: "Orthocenter H",
+    centerCentroidDesc: "Arithmetic mean of all vertices",
+    centerCircumcenterDesc: "Centre of circumscribed circle",
+    centerIncenterDesc: "Centre of inscribed circle",
+    centerOrthocenterDesc: "Intersection of altitudes",
+    showCircumcircle: "Circumcircle",
+    showIncircle: "Incircle",
+    circumradius: "Circumradius",
+    inradius: "Inradius",
+    coordLabel: "Coords",
+    centerNote: "(Exact for triangles; approximate for polygons)",
+    centerNoteTriangle: "(Exact for triangle)",
+
+    tabVolume: "Volume",
+    tabFaces: "Faces",
+    tabDihedralMatrix: "Dihedral Matrix",
+    labelVolume: "Volume",
+    unitVolCube: "cu. units",
+    formulaPrism: "V = Base area × h",
+    formulaPyramid: "V = ⅓ × Base area × h",
+    labelBaseArea: "Base area",
+    labelHeightH: "Height h",
+    labelLateralEdges: "Lateral edges",
+    labelFaceArea: "Area",
+    unitFaceVerts: "verts",
+
+    sectionDihedral: "Dihedral Angles",
     labelPlaneA: "Plane A",
     labelPlaneB: "Plane B",
-    dihedralAngle: "Dihedral Angle",
+    dihedralAngle: "Angle",
     dihedralRad: "rad",
-    dihedralHint: "Select two different planes",
+    dihedralHint: "Select two different faces",
+    dihedralMatrixHint: "Click any cell to select the two corresponding faces",
+    dihedralClickHint: "You can also click faces in the 3D view on the right",
+    colFace: "Face",
 
-    // Tabs
-    tabBase: "Base",
-    tabSolid: "Solid",
-    tabFaces: "Faces",
-    tabDihedralMatrix: "Angle Matrix",
+    viewerHint: "Drag to rotate · Scroll to zoom · Right-click to pan · Click face to select",
+    viewerNeedPoints: "Please set at least 3 vertices",
+    viewerClickFaceHint: "Click first face…",
+    viewerClickFace2Hint: "Click second face…",
+    viewerFaceSelected: "Selected: ",
 
-    // Base results
-    cardEdgeLengths: "Edge Lengths",
-    labelPerimeter: "Perimeter",
-    unitLength: "units",
-    cardAngles: "Interior Angles",
-    labelAngleSum: "Sum",
-    unitDeg: "°",
-    cardArea: "Base Area",
-    unitAreaSq: "sq units",
-    formulaArea: "(shoelace formula)",
+    canvas2DHint: "Drag vertices to reposition",
+    canvas2DGrid: "Show grid",
 
-    // Solid results
-    cardVolume: "Volume",
-    unitVolCube: "cubic units",
-    formulaPrism: "V = A × h",
-    formulaPyramid: "V = ⅓ × A × h",
-    labelBaseArea: "Base Area A",
-    labelHeightH: "Height h",
-    cardLateralEdges: "Lateral Edges",
-    labelLateralEdgePrism: "lateral",
-    labelLateralEdgePyramid: "slant",
-
-    // Faces
-    cardFaceArea: "Area",
-    unitFaceVerts: "vertices",
-
-    // Dihedral matrix
-    dihedralMatrixHint:
-      "Dihedral angle between any two faces (degrees). Diagonal = 0° (same face).",
-    colFace: "Face / Face",
-
-    // Face labels
-    faceBase: "Base",
-    faceTop: "Top",
-    faceSide: "Side",
-    faceApex: "Apex A",
-
-    // Viewer hint
-    viewerHint: "Drag to rotate · Scroll to zoom · Right-click to pan",
-    viewerNeedPoints: "Please enter at least 3 base vertices",
-
-    // Status bar
     statusPoints: "pts",
     statusPrism: "Prism",
     statusPyramid: "Pyramid",
