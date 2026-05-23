@@ -1,27 +1,24 @@
 /**
- * Home.tsx — Main page for Solid Geometry Calculator
+ * Home.tsx — Solid Geometry Calculator
  *
- * Design: Elegant White Tech
- * - Background: #f8fafc (near-white slate)
- * - Primary accent: #6366f1 (indigo)
- * - Secondary: #14b8a6 (teal)
- * - Highlight values: #f59e0b (amber)
- * - Typography: Space Grotesk (labels) + JetBrains Mono (numbers)
+ * Design: Deep Tech Dark
+ * - Background: #0a0e1a (deepest navy)
+ * - Panels: #0f1629
+ * - Accent: #00d4ff (cyan)
+ * - Values: #ffb800 (amber)
+ * - Success: #00ff9d (green)
+ * - Fonts: Space Grotesk + JetBrains Mono
  *
- * Two-step workflow:
- *   Step 1: Set up named vertices → 2D diagram + calculations (edges, angles, area, four centers)
- *   Step 2: Build 3D solid → 3D viewer + calculations (volume, faces, dihedral angles)
- *
- * Features:
- * - Click 3D faces to select dihedral pair
- * - Dihedral helper: shared edge, normal arrows, angle arc
- * - Four centers: centroid G, circumcenter O, incenter I, orthocenter H (toggle each)
+ * Workflow:
+ *   Step 1: Name vertices → input sides & angles → auto-solve with LaTeX steps → 2D diagram
+ *   Step 2: Build 3D solid → 3D viewer + volume + dihedral angles (click to select)
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useLang } from "@/contexts/LangContext";
 import BaseCanvas2D, { type CenterVisibility } from "@/components/BaseCanvas2D";
 import SolidViewer from "@/components/SolidViewer";
+import KaTeXRenderer from "@/components/KaTeXRenderer";
 import {
   computeBase,
   computeSolid,
@@ -31,6 +28,7 @@ import {
   type NamedPoint,
   type SolidType,
 } from "@/lib/geometry";
+import { solvePolygon, type SolverResult } from "@/lib/solver";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -42,301 +40,259 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, RotateCcw, Trash2, ArrowRight, ArrowLeft, MousePointerClick } from "lucide-react";
+import {
+  Plus, RotateCcw, Trash2, ArrowRight, ArrowLeft,
+  MousePointerClick, ChevronDown, ChevronUp, CheckCircle2, AlertCircle
+} from "lucide-react";
 
-// ── Default presets ──────────────────────────────────────────────────────────
+// ── Presets ───────────────────────────────────────────────────────────────────
 const PRESETS: Record<string, NamedPoint[]> = {
-  "3": [
-    { label: "A", x: 0, y: 0 },
-    { label: "B", x: 4, y: 0 },
-    { label: "C", x: 2, y: 3 },
-  ],
-  "4": [
-    { label: "A", x: 0, y: 0 },
-    { label: "B", x: 4, y: 0 },
-    { label: "C", x: 4, y: 3 },
-    { label: "D", x: 0, y: 3 },
-  ],
-  "5": [
-    { label: "A", x: 0, y: 0 },
-    { label: "B", x: 4, y: 0 },
-    { label: "C", x: 5, y: 3 },
-    { label: "D", x: 2, y: 5 },
-    { label: "E", x: -1, y: 3 },
-  ],
-  "6": [
-    { label: "A", x: 2, y: 0 },
-    { label: "B", x: 4, y: 1 },
-    { label: "C", x: 4, y: 3 },
-    { label: "D", x: 2, y: 4 },
-    { label: "E", x: 0, y: 3 },
-    { label: "F", x: 0, y: 1 },
-  ],
+  "3": [{ label: "A", x: 0, y: 0 }, { label: "B", x: 4, y: 0 }, { label: "C", x: 2, y: 3 }],
+  "4": [{ label: "A", x: 0, y: 0 }, { label: "B", x: 4, y: 0 }, { label: "C", x: 4, y: 3 }, { label: "D", x: 0, y: 3 }],
+  "5": [{ label: "A", x: 0, y: 0 }, { label: "B", x: 4, y: 0 }, { label: "C", x: 5, y: 3 }, { label: "D", x: 2, y: 5 }, { label: "E", x: -1, y: 3 }],
+  "6": [{ label: "A", x: 2, y: 0 }, { label: "B", x: 4, y: 1 }, { label: "C", x: 4, y: 3 }, { label: "D", x: 2, y: 4 }, { label: "E", x: 0, y: 3 }, { label: "F", x: 0, y: 1 }],
 };
 
-// ── Style tokens ─────────────────────────────────────────────────────────────
-const S = {
-  bg: "#f8fafc",
-  panel: "#ffffff",
-  panelBorder: "#e2e8f0",
-  panelBorder2: "#f1f5f9",
-  text: "#0f172a",
-  textMuted: "#64748b",
-  textFaint: "#94a3b8",
-  accent: "#6366f1",
-  accentLight: "#eef2ff",
-  accentMid: "#818cf8",
-  teal: "#14b8a6",
-  tealLight: "#f0fdfa",
-  amber: "#f59e0b",
-  amberLight: "#fffbeb",
-  rose: "#f43f5e",
-  headerBg: "#ffffff",
-  headerBorder: "#e2e8f0",
-  cardBg: "#f8fafc",
-  cardBorder: "#e2e8f0",
-  mono: "'JetBrains Mono', monospace",
-  sans: "'Space Grotesk', sans-serif",
+const CENTER_KEYS = ["centroid", "circumcenter", "incenter", "orthocenter"] as const;
+type CenterKey = (typeof CENTER_KEYS)[number];
+const CENTER_SYMBOL: Record<CenterKey, string> = { centroid: "G", circumcenter: "O", incenter: "I", orthocenter: "H" };
+
+// ── Tokens ────────────────────────────────────────────────────────────────────
+const T = {
+  bg: "#0a0e1a", panel: "#0f1629", card: "#141d35", input: "#1a2540",
+  borderDim: "#1e2d4a", borderMid: "#263554", borderHi: "#2e4070",
+  textHi: "#e8f0ff", textMid: "#8899bb", textDim: "#3d5070",
+  cyan: "#00d4ff", cyanDim: "#0099bb", cyanGlow: "rgba(0,212,255,0.12)",
+  green: "#00ff9d", amber: "#ffb800", rose: "#ff4466", violet: "#8b5cf6",
+  mono: "'JetBrains Mono', monospace", sans: "'Space Grotesk', sans-serif",
 };
 
 const fmt = (n: number, dp = 4) => n.toFixed(dp);
-const fmtShort = (n: number) => n.toFixed(2);
-
-// ── Center config ─────────────────────────────────────────────────────────────
-const CENTER_KEYS = ["centroid", "circumcenter", "incenter", "orthocenter"] as const;
-type CenterKey = (typeof CENTER_KEYS)[number];
-
-const CENTER_SYMBOL: Record<CenterKey, string> = {
-  centroid: "G",
-  circumcenter: "O",
-  incenter: "I",
-  orthocenter: "H",
-};
 
 export default function Home() {
   const { t, lang, setLang } = useLang();
 
   // ── State ─────────────────────────────────────────────────────────────────
   const [step, setStep] = useState<1 | 2>(1);
-  const [points, setPoints] = useState<NamedPoint[]>(PRESETS["4"]);
+  const [points, setPoints] = useState<NamedPoint[]>(PRESETS["3"]);
   const [solidType, setSolidType] = useState<SolidType>("prism");
   const [height, setHeight] = useState<number>(5);
   const [apexLabel, setApexLabel] = useState<string>("A'");
   const [showGrid, setShowGrid] = useState(true);
 
-  // Centers visibility
+  // Solver inputs: sides and angles (null = unknown)
+  const [inputSides, setInputSides] = useState<(number | null)[]>([3, 4, 5]);
+  const [inputAngles, setInputAngles] = useState<(number | null)[]>([null, null, null]);
+
+  // Centers
   const [centerVis, setCenterVis] = useState<CenterVisibility>({
-    centroid: false,
-    circumcenter: false,
-    incenter: false,
-    orthocenter: false,
-    circumcircle: false,
-    incircle: false,
+    centroid: false, circumcenter: false, incenter: false, orthocenter: false,
+    circumcircle: false, incircle: false,
   });
 
-  // Dihedral selection
+  // Dihedral
   const [faceAIdx, setFaceAIdx] = useState<number>(0);
   const [faceBIdx, setFaceBIdx] = useState<number>(1);
-  // Click-to-select state: 0 = waiting for face A, 1 = waiting for face B
   const [clickSelectStep, setClickSelectStep] = useState<0 | 1>(0);
 
-  // ── Computed geometry ─────────────────────────────────────────────────────
-  const baseResult = useMemo(() => {
+  // Steps expanded
+  const [expandedStep, setExpandedStep] = useState<number | null>(null);
+
+  // ── Sync points count with solver inputs ──────────────────────────────────
+  const syncInputArrays = (n: number) => {
+    setInputSides((prev) => {
+      const next = [...prev];
+      while (next.length < n) next.push(null);
+      return next.slice(0, n);
+    });
+    setInputAngles((prev) => {
+      const next = [...prev];
+      while (next.length < n) next.push(null);
+      return next.slice(0, n);
+    });
+  };
+
+  // ── Solver ────────────────────────────────────────────────────────────────
+  const solverResult: SolverResult | null = useMemo(() => {
     if (points.length < 3) return null;
-    return computeBase(points);
-  }, [points]);
+    const n = points.length;
+    const sides = inputSides.slice(0, n);
+    const angles = inputAngles.slice(0, n);
+    return solvePolygon(points.map((p) => p.label), sides, angles);
+  }, [points, inputSides, inputAngles]);
+
+  // Sync solved coordinates back to points for 2D display
+  const displayPoints: NamedPoint[] = useMemo(() => {
+    if (solverResult?.success && solverResult.vertices.length === points.length) {
+      return points.map((p, i) => ({
+        ...p,
+        x: solverResult.vertices[i].x,
+        y: solverResult.vertices[i].y,
+      }));
+    }
+    return points;
+  }, [solverResult, points]);
+
+  // ── Geometry from solved/display points ──────────────────────────────────
+  const baseResult = useMemo(() => {
+    if (displayPoints.length < 3) return null;
+    return computeBase(displayPoints);
+  }, [displayPoints]);
 
   const centersResult = useMemo(() => {
-    if (points.length < 3) return null;
-    return computeCenters(points);
-  }, [points]);
+    if (displayPoints.length < 3) return null;
+    return computeCenters(displayPoints);
+  }, [displayPoints]);
 
   const solidResult = useMemo(() => {
-    if (points.length < 3) return null;
-    return computeSolid(points, solidType, height, apexLabel);
-  }, [points, solidType, height, apexLabel]);
+    if (displayPoints.length < 3) return null;
+    return computeSolid(displayPoints, solidType, height, apexLabel);
+  }, [displayPoints, solidType, height, apexLabel]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  const updatePoint = useCallback(
-    (i: number, field: keyof NamedPoint, value: string | number) => {
-      setPoints((prev) => {
-        const next = [...prev];
-        next[i] = { ...next[i], [field]: value };
-        return next;
-      });
-    },
-    []
-  );
+  const updateLabel = useCallback((i: number, label: string) => {
+    setPoints((prev) => { const n = [...prev]; n[i] = { ...n[i], label }; return n; });
+  }, []);
 
   const movePoint = useCallback((i: number, x: number, y: number) => {
-    setPoints((prev) => {
-      const next = [...prev];
-      next[i] = { ...next[i], x, y };
-      return next;
-    });
+    setPoints((prev) => { const n = [...prev]; n[i] = { ...n[i], x, y }; return n; });
   }, []);
 
   const addPoint = () => {
     if (points.length >= 6) return;
-    const labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    const usedLabels = new Set(points.map((p) => p.label));
-    let newLabel = "";
-    for (const l of labels) {
-      if (!usedLabels.has(l)) { newLabel = l; break; }
-    }
-    if (!newLabel) newLabel = `P${points.length + 1}`;
-    setPoints((prev) => [...prev, { label: newLabel, x: 0, y: 0 }]);
+    const used = new Set(points.map((p) => p.label));
+    let lbl = "";
+    for (const c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") { if (!used.has(c)) { lbl = c; break; } }
+    if (!lbl) lbl = `P${points.length + 1}`;
+    const n = points.length + 1;
+    setPoints((prev) => [...prev, { label: lbl, x: 0, y: 0 }]);
+    syncInputArrays(n);
   };
 
   const removePoint = (i: number) => {
     if (points.length <= 3) return;
+    const n = points.length - 1;
     setPoints((prev) => prev.filter((_, idx) => idx !== i));
+    setInputSides((prev) => prev.filter((_, idx) => idx !== i).slice(0, n));
+    setInputAngles((prev) => prev.filter((_, idx) => idx !== i).slice(0, n));
   };
 
-  const applyPreset = (n: string) => setPoints(PRESETS[n]);
-  const resetPoints = () => setPoints(PRESETS["4"]);
+  const applyPreset = (n: string) => {
+    setPoints(PRESETS[n]);
+    const count = Number(n);
+    setInputSides(new Array(count).fill(null));
+    setInputAngles(new Array(count).fill(null));
+  };
 
   const toggleCenter = (key: keyof CenterVisibility) => {
     setCenterVis((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // 3D face click handler
-  const handleFaceClick = useCallback(
-    (faceIdx: number) => {
-      if (clickSelectStep === 0) {
-        setFaceAIdx(faceIdx);
-        setClickSelectStep(1);
-      } else {
-        if (faceIdx !== faceAIdx) {
-          setFaceBIdx(faceIdx);
-        }
-        setClickSelectStep(0);
-      }
-    },
-    [clickSelectStep, faceAIdx]
-  );
+  const handleFaceClick = useCallback((faceIdx: number) => {
+    if (clickSelectStep === 0) { setFaceAIdx(faceIdx); setClickSelectStep(1); }
+    else { if (faceIdx !== faceAIdx) setFaceBIdx(faceIdx); setClickSelectStep(0); }
+  }, [clickSelectStep, faceAIdx]);
 
   // ── Dihedral ──────────────────────────────────────────────────────────────
   const faces = solidResult?.faces ?? [];
-  const dihedralDeg =
-    solidResult && faces.length > 1 && faceAIdx !== faceBIdx
-      ? solidResult.dihedralMatrix[faceAIdx]?.[faceBIdx] ?? 0
-      : 0;
+  const dihedralDeg = solidResult && faces.length > 1 && faceAIdx !== faceBIdx
+    ? (solidResult.dihedralMatrix[faceAIdx]?.[faceBIdx] ?? 0) : 0;
   const dihedralRad = (dihedralDeg * Math.PI) / 180;
+
+  // ── Side/angle input helpers ──────────────────────────────────────────────
+  const n = points.length;
+  const sideLabel = (i: number) => `${points[i].label}${points[(i + 1) % n].label}`;
+  const angleLabel = (i: number) => points[i].label;
+
+  const setSide = (i: number, v: string) => {
+    const num = v === "" ? null : parseFloat(v);
+    setInputSides((prev) => { const next = [...prev]; next[i] = isNaN(num as number) ? null : num; return next; });
+  };
+  const setAngle = (i: number, v: string) => {
+    const num = v === "" ? null : parseFloat(v);
+    setInputAngles((prev) => { const next = [...prev]; next[i] = isNaN(num as number) ? null : num; return next; });
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: S.bg, color: S.text, fontFamily: S.sans }}
-    >
+    <div className="min-h-screen flex flex-col" style={{ background: T.bg, color: T.textHi, fontFamily: T.sans }}>
+
       {/* ── Header ── */}
-      <header
-        className="flex items-center justify-between px-4 py-2.5 border-b"
-        style={{
-          background: S.headerBg,
-          borderColor: S.headerBorder,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-        }}
-      >
+      <header style={{ background: T.panel, borderBottom: `1px solid ${T.borderDim}`, boxShadow: "0 1px 12px rgba(0,0,0,0.4)" }}
+        className="flex items-center justify-between px-4 py-2.5">
         <div className="flex items-center gap-3">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold shadow-sm"
-            style={{
-              background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-              color: "#ffffff",
-            }}
-          >
-            Σ
-          </div>
+          <div style={{
+            width: 34, height: 34, borderRadius: 8,
+            background: "linear-gradient(135deg, #00b8d9 0%, #0050aa 100%)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: 900, fontSize: 16, color: "#fff",
+            boxShadow: "0 0 16px rgba(0,212,255,0.3)",
+          }}>Σ</div>
           <div>
-            <div className="font-bold text-sm" style={{ color: S.text }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: T.textHi, letterSpacing: "0.02em" }}>
               {t.appTitle}
             </div>
-            <div className="text-xs" style={{ color: S.textFaint }}>
-              {t.appSubtitle}
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: T.mono }}>
+              Solid Geometry Calculator
             </div>
           </div>
         </div>
 
-        {/* Step indicator */}
-        <div className="flex items-center gap-2 text-xs">
-          <button
-            onClick={() => setStep(1)}
-            className="px-3 py-1.5 rounded-full font-semibold transition-all"
-            style={{
-              background: step === 1 ? S.accent : S.panelBorder2,
-              color: step === 1 ? "#ffffff" : S.textMuted,
-              boxShadow: step === 1 ? "0 2px 8px rgba(99,102,241,0.3)" : "none",
-            }}
-          >
-            {t.step1Label}
-          </button>
-          <ArrowRight size={12} style={{ color: S.textFaint }} />
-          <button
-            onClick={() => { if (points.length >= 3) setStep(2); }}
-            className="px-3 py-1.5 rounded-full font-semibold transition-all"
-            style={{
-              background: step === 2 ? S.amber : S.panelBorder2,
-              color: step === 2 ? "#ffffff" : S.textMuted,
-              boxShadow: step === 2 ? "0 2px 8px rgba(245,158,11,0.3)" : "none",
-              opacity: points.length < 3 ? 0.5 : 1,
-            }}
-          >
-            {t.step2Label}
-          </button>
+        {/* Step tabs */}
+        <div className="flex items-center gap-2" style={{ fontSize: 12 }}>
+          {[1, 2].map((s) => (
+            <button key={s} onClick={() => { if (s === 2 && points.length < 3) return; setStep(s as 1 | 2); }}
+              style={{
+                padding: "5px 14px", borderRadius: 20, fontWeight: 700,
+                background: step === s ? (s === 1 ? T.cyan : T.amber) : T.card,
+                color: step === s ? "#000d1a" : T.textMid,
+                border: `1px solid ${step === s ? (s === 1 ? T.cyan : T.amber) : T.borderMid}`,
+                boxShadow: step === s ? `0 0 12px ${s === 1 ? "rgba(0,212,255,0.3)" : "rgba(255,184,0,0.3)"}` : "none",
+                transition: "all 0.2s",
+              }}>
+              {s === 1 ? t.step1Label : t.step2Label}
+            </button>
+          ))}
         </div>
 
-        <button
-          onClick={() => setLang(lang === "zh" ? "en" : "zh")}
-          className="text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors hover:bg-slate-50"
-          style={{ borderColor: S.panelBorder, color: S.accent }}
-        >
+        <button onClick={() => setLang(lang === "zh" ? "en" : "zh")}
+          style={{
+            fontSize: 11, padding: "4px 12px", borderRadius: 6,
+            border: `1px solid ${T.borderMid}`, color: T.cyan,
+            background: "transparent", fontWeight: 600,
+          }}>
           {t.langSwitch}
         </button>
       </header>
 
-      {/* ── Main layout ── */}
+      {/* ── Main ── */}
       <div className="flex flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+
         {/* ── Left panel ── */}
-        <aside
-          className="flex flex-col gap-3 overflow-y-auto p-3"
-          style={{
-            width: 272,
-            minWidth: 220,
-            background: S.panel,
-            borderRight: `1px solid ${S.panelBorder}`,
-          }}
-        >
-          {/* ── Vertex setup ── */}
+        <aside className="flex flex-col gap-2 overflow-y-auto p-3"
+          style={{ width: 264, minWidth: 200, background: T.panel, borderRight: `1px solid ${T.borderDim}` }}>
+
+          {/* Vertex labels */}
           <section>
             <div className="flex items-center justify-between mb-2">
-              <span
-                className="text-xs font-bold uppercase tracking-widest"
-                style={{ color: S.accent }}
-              >
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: T.cyan, textTransform: "uppercase" }}>
                 {t.sectionVertices}
               </span>
               <div className="flex gap-1">
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
-                      onClick={resetPoints}
-                      className="p-1 rounded hover:bg-slate-100 transition-colors"
-                    >
-                      <RotateCcw size={13} style={{ color: S.textMuted }} />
+                    <button onClick={() => applyPreset(String(points.length))}
+                      className="p-1 rounded transition-colors hover:bg-slate-800">
+                      <RotateCcw size={12} style={{ color: T.textMid }} />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>{t.tooltipReset}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
-                      onClick={addPoint}
-                      disabled={points.length >= 6}
-                      className="p-1 rounded hover:bg-slate-100 transition-colors disabled:opacity-30"
-                    >
-                      <Plus size={13} style={{ color: S.accent }} />
+                    <button onClick={addPoint} disabled={points.length >= 6}
+                      className="p-1 rounded transition-colors hover:bg-slate-800 disabled:opacity-30">
+                      <Plus size={12} style={{ color: T.cyan }} />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>{t.tooltipAddPoint}</TooltipContent>
@@ -347,102 +303,141 @@ export default function Home() {
             {/* Preset buttons */}
             <div className="flex gap-1 mb-2">
               {(["3", "4", "5", "6"] as const).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => applyPreset(n)}
-                  className="flex-1 py-1 text-xs rounded-md font-medium transition-all"
+                <button key={n} onClick={() => applyPreset(n)}
                   style={{
-                    background: points.length === Number(n) ? S.accent : S.cardBg,
-                    color: points.length === Number(n) ? "#ffffff" : S.textMuted,
-                    border: `1px solid ${points.length === Number(n) ? S.accent : S.cardBorder}`,
-                  }}
-                >
+                    flex: 1, padding: "3px 0", fontSize: 11, borderRadius: 5, fontWeight: 600,
+                    background: points.length === Number(n) ? T.cyan : T.card,
+                    color: points.length === Number(n) ? "#000d1a" : T.textMid,
+                    border: `1px solid ${points.length === Number(n) ? T.cyan : T.borderMid}`,
+                  }}>
                   {n === "3" ? t.presetTriangle : n === "4" ? t.presetSquare : n === "5" ? t.presetPentagon : t.presetHexagon}
                 </button>
               ))}
             </div>
 
-            {/* Column headers */}
-            <div className="flex gap-1 mb-1 text-xs" style={{ color: S.textFaint }}>
-              <div style={{ width: 42 }}>{t.labelVertexName}</div>
-              <div className="flex-1 text-center">{t.labelX}</div>
-              <div className="flex-1 text-center">{t.labelY}</div>
-              <div style={{ width: 20 }} />
-            </div>
-
-            {/* Vertex rows */}
+            {/* Vertex name rows */}
             {points.map((pt, i) => (
-              <div key={i} className="flex gap-1 mb-1 items-center">
-                <div className="flex items-center gap-1" style={{ width: 42 }}>
-                  <div
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ background: getFaceColor(i + 2) }}
-                  />
-                  <Input
-                    value={pt.label}
-                    onChange={(e) => updatePoint(i, "label", e.target.value)}
-                    className="h-6 text-xs px-1 font-bold"
-                    style={{
-                      background: S.cardBg,
-                      border: `1px solid ${S.cardBorder}`,
-                      color: getFaceColor(i + 2),
-                      width: 30,
-                      minWidth: 0,
-                    }}
-                    maxLength={4}
-                  />
-                </div>
-                <Input
-                  type="number"
-                  value={pt.x}
-                  onChange={(e) => updatePoint(i, "x", parseFloat(e.target.value) || 0)}
-                  className="flex-1 h-6 text-xs px-1"
-                  style={{ background: S.cardBg, border: `1px solid ${S.cardBorder}`, color: S.text }}
-                  step={0.5}
-                />
-                <Input
-                  type="number"
-                  value={pt.y}
-                  onChange={(e) => updatePoint(i, "y", parseFloat(e.target.value) || 0)}
-                  className="flex-1 h-6 text-xs px-1"
-                  style={{ background: S.cardBg, border: `1px solid ${S.cardBorder}`, color: S.text }}
-                  step={0.5}
-                />
-                <button
-                  onClick={() => removePoint(i)}
-                  disabled={points.length <= 3}
-                  className="p-0.5 rounded hover:bg-rose-50 transition-colors disabled:opacity-20"
-                >
-                  <Trash2 size={11} style={{ color: S.rose }} />
+              <div key={i} className="flex items-center gap-1 mb-1">
+                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: getFaceColor(i + 2) }} />
+                <Input value={pt.label} onChange={(e) => updateLabel(i, e.target.value)}
+                  className="tech-input h-6 px-1 font-bold text-center"
+                  style={{ width: 32, minWidth: 0, color: getFaceColor(i + 2), fontSize: 12 }}
+                  maxLength={4} />
+                <span style={{ fontSize: 10, color: T.textDim, flex: 1, textAlign: "center" }}>
+                  {lang === "zh" ? "頂點" : "vertex"} {i + 1}
+                </span>
+                <button onClick={() => removePoint(i)} disabled={points.length <= 3}
+                  className="p-0.5 rounded hover:bg-rose-900/30 transition-colors disabled:opacity-20">
+                  <Trash2 size={11} style={{ color: T.rose }} />
                 </button>
               </div>
             ))}
-
-            <p className="text-xs mt-1" style={{ color: S.textFaint }}>
-              ⊙ {t.hintBase}
-            </p>
           </section>
 
-          {/* ── STEP 2: Solid settings ── */}
+          {/* ── Input: sides & angles ── */}
+          <section style={{ background: T.card, border: `1px solid ${T.borderDim}`, borderRadius: 8, padding: "10px" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: T.amber, textTransform: "uppercase", marginBottom: 8 }}>
+              {lang === "zh" ? "輸入已知數據" : "Known Values"}
+            </div>
+
+            {/* Column headers */}
+            <div className="flex gap-1 mb-1" style={{ fontSize: 9, color: T.textDim }}>
+              <div style={{ width: 28 }} />
+              <div style={{ flex: 1, textAlign: "center" }}>{lang === "zh" ? "邊長" : "Side"}</div>
+              <div style={{ flex: 1, textAlign: "center" }}>{lang === "zh" ? "角度°" : "Angle°"}</div>
+            </div>
+
+            {points.map((_, i) => {
+              const sLbl = sideLabel(i);
+              const aLbl = angleLabel(i);
+              const sVal = inputSides[i];
+              const aVal = inputAngles[i];
+              const sSolved = solverResult?.sides[i];
+              const aSolved = solverResult?.angles[i];
+
+              return (
+                <div key={i} className="flex items-center gap-1 mb-1">
+                  <div style={{ width: 28, fontSize: 10, color: T.textMid, fontFamily: T.mono, textAlign: "right" }}>
+                    <span style={{ color: getFaceColor(i + 2) }}>{aLbl}</span>
+                  </div>
+
+                  {/* Side input */}
+                  <div style={{ flex: 1, position: "relative" }}>
+                    <Input
+                      type="number"
+                      placeholder={sLbl}
+                      value={sVal ?? ""}
+                      onChange={(e) => setSide(i, e.target.value)}
+                      className="tech-input h-6 px-1 text-center"
+                      style={{ fontSize: 11, width: "100%", color: sVal !== null ? T.cyan : T.textDim }}
+                      min={0} step={0.1}
+                    />
+                    {sVal === null && sSolved?.state === "solved" && sSolved.value !== null && (
+                      <div style={{
+                        position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 11, color: T.green, fontFamily: T.mono, pointerEvents: "none",
+                        background: "rgba(0,255,157,0.06)", borderRadius: 4,
+                      }}>
+                        {fmt(sSolved.value, 3)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Angle input */}
+                  <div style={{ flex: 1, position: "relative" }}>
+                    <Input
+                      type="number"
+                      placeholder={`∠${aLbl}`}
+                      value={aVal ?? ""}
+                      onChange={(e) => setAngle(i, e.target.value)}
+                      className="tech-input h-6 px-1 text-center"
+                      style={{ fontSize: 11, width: "100%", color: aVal !== null ? T.amber : T.textDim }}
+                      min={0} max={180} step={0.1}
+                    />
+                    {aVal === null && aSolved?.state === "solved" && aSolved.value !== null && (
+                      <div style={{
+                        position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 11, color: T.green, fontFamily: T.mono, pointerEvents: "none",
+                        background: "rgba(0,255,157,0.06)", borderRadius: 4,
+                      }}>
+                        {fmt(aSolved.value, 2)}°
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Solver status */}
+            {solverResult && (
+              <div className="flex items-center gap-1.5 mt-2 px-2 py-1.5 rounded"
+                style={{
+                  background: solverResult.success ? "rgba(0,255,157,0.08)" : "rgba(255,68,102,0.08)",
+                  border: `1px solid ${solverResult.success ? T.green + "44" : T.rose + "44"}`,
+                }}>
+                {solverResult.success
+                  ? <CheckCircle2 size={12} style={{ color: T.green }} />
+                  : <AlertCircle size={12} style={{ color: T.rose }} />}
+                <span style={{ fontSize: 10, color: solverResult.success ? T.green : T.rose }}>
+                  {solverResult.success
+                    ? (lang === "zh" ? "✓ 已完全求解" : "✓ Fully solved")
+                    : (solverResult.error ?? (lang === "zh" ? "資料不足" : "Insufficient data"))}
+                </span>
+              </div>
+            )}
+          </section>
+
+          {/* ── Step 2: Solid settings ── */}
           {step === 2 && (
-            <section
-              className="rounded-lg p-2.5"
-              style={{ background: S.amberLight, border: `1px solid #fde68a` }}
-            >
-              <div
-                className="text-xs font-bold uppercase tracking-widest mb-2"
-                style={{ color: S.amber }}
-              >
+            <section style={{ background: "rgba(255,184,0,0.06)", border: `1px solid rgba(255,184,0,0.2)`, borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: T.amber, textTransform: "uppercase", marginBottom: 8 }}>
                 {t.sectionSolidType}
               </div>
               <div className="flex gap-2 mb-2">
-                <div className="flex-1">
-                  <div className="text-xs mb-1" style={{ color: S.textMuted }}>{t.labelType}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: T.textMid, marginBottom: 3 }}>{t.labelType}</div>
                   <Select value={solidType} onValueChange={(v) => setSolidType(v as SolidType)}>
-                    <SelectTrigger
-                      className="h-7 text-xs"
-                      style={{ background: "#ffffff", border: `1px solid #fde68a`, color: S.text }}
-                    >
+                    <SelectTrigger className="h-7 text-xs tech-input" style={{ color: T.amber }}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -451,180 +446,104 @@ export default function Home() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex-1">
-                  <div className="text-xs mb-1" style={{ color: S.textMuted }}>{t.labelHeight}</div>
-                  <Input
-                    type="number"
-                    value={height}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: T.textMid, marginBottom: 3 }}>{t.labelHeight}</div>
+                  <Input type="number" value={height}
                     onChange={(e) => setHeight(parseFloat(e.target.value) || 1)}
-                    className="h-7 text-xs"
-                    style={{ background: "#ffffff", border: `1px solid #fde68a`, color: S.amber, fontFamily: S.mono }}
-                    min={0.1}
-                    step={0.5}
-                  />
+                    className="h-7 tech-input" style={{ color: T.amber }} min={0.1} step={0.5} />
                 </div>
               </div>
               {solidType === "pyramid" && (
                 <div>
-                  <div className="text-xs mb-1" style={{ color: S.textMuted }}>{t.labelApexLabel}</div>
-                  <Input
-                    value={apexLabel}
-                    onChange={(e) => setApexLabel(e.target.value)}
-                    className="h-7 text-xs"
-                    style={{ background: "#ffffff", border: `1px solid #fde68a`, color: S.amber }}
-                    maxLength={4}
-                  />
+                  <div style={{ fontSize: 10, color: T.textMid, marginBottom: 3 }}>{t.labelApexLabel}</div>
+                  <Input value={apexLabel} onChange={(e) => setApexLabel(e.target.value)}
+                    className="h-7 tech-input" style={{ color: T.amber }} maxLength={4} />
                 </div>
               )}
             </section>
           )}
 
-          {/* ── STEP 2: Dihedral selector ── */}
+          {/* ── Step 2: Dihedral selector ── */}
           {step === 2 && solidResult && faces.length > 1 && (
-            <section
-              className="rounded-lg p-2.5"
-              style={{ background: S.accentLight, border: `1px solid #c7d2fe` }}
-            >
-              <div
-                className="text-xs font-bold uppercase tracking-widest mb-2"
-                style={{ color: S.accent }}
-              >
+            <section style={{ background: "rgba(0,212,255,0.05)", border: `1px solid rgba(0,212,255,0.15)`, borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", color: T.cyan, textTransform: "uppercase", marginBottom: 8 }}>
                 {t.sectionDihedral}
               </div>
-
-              {/* Click-to-select status */}
-              <div
-                className="flex items-center gap-1.5 mb-2 px-2 py-1.5 rounded-md text-xs"
+              <div className="flex items-center gap-1.5 mb-2 px-2 py-1.5 rounded"
                 style={{
-                  background: clickSelectStep === 1 ? "#fef3c7" : "#f0fdf4",
-                  border: `1px solid ${clickSelectStep === 1 ? "#fde68a" : "#bbf7d0"}`,
-                  color: clickSelectStep === 1 ? "#92400e" : "#166534",
-                }}
-              >
-                <MousePointerClick size={12} />
-                {clickSelectStep === 0
-                  ? t.viewerClickFaceHint
-                  : t.viewerClickFace2Hint}
+                  background: clickSelectStep === 1 ? "rgba(255,184,0,0.1)" : "rgba(0,255,157,0.08)",
+                  border: `1px solid ${clickSelectStep === 1 ? "rgba(255,184,0,0.3)" : "rgba(0,255,157,0.2)"}`,
+                  fontSize: 10, color: clickSelectStep === 1 ? T.amber : T.green,
+                }}>
+                <MousePointerClick size={11} />
+                {clickSelectStep === 0 ? t.viewerClickFaceHint : t.viewerClickFace2Hint}
               </div>
-
               <div className="flex gap-2 mb-2">
-                <div className="flex-1">
-                  <div className="text-xs mb-1" style={{ color: S.textMuted }}>{t.labelPlaneA}</div>
-                  <Select
-                    value={String(faceAIdx)}
-                    onValueChange={(v) => setFaceAIdx(Number(v))}
-                  >
-                    <SelectTrigger
-                      className="h-7 text-xs"
-                      style={{
-                        background: "#ffffff",
-                        border: `2px solid ${getFaceColor(faceAIdx)}`,
-                        color: getFaceColor(faceAIdx),
-                        fontWeight: 700,
-                      }}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {faces.map((f, i) => (
-                        <SelectItem key={i} value={String(i)}>
-                          <span style={{ color: getFaceColor(i) }}>{f.name}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs mb-1" style={{ color: S.textMuted }}>{t.labelPlaneB}</div>
-                  <Select
-                    value={String(faceBIdx)}
-                    onValueChange={(v) => setFaceBIdx(Number(v))}
-                  >
-                    <SelectTrigger
-                      className="h-7 text-xs"
-                      style={{
-                        background: "#ffffff",
-                        border: `2px solid ${getFaceColor(faceBIdx)}`,
-                        color: getFaceColor(faceBIdx),
-                        fontWeight: 700,
-                      }}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {faces.map((f, i) => (
-                        <SelectItem key={i} value={String(i)}>
-                          <span style={{ color: getFaceColor(i) }}>{f.name}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {[{ label: t.labelPlaneA, idx: faceAIdx, setIdx: setFaceAIdx },
+                  { label: t.labelPlaneB, idx: faceBIdx, setIdx: setFaceBIdx }].map(({ label, idx, setIdx }) => (
+                  <div key={label} style={{ flex: 1 }}>
+                    <div style={{ fontSize: 10, color: T.textMid, marginBottom: 3 }}>{label}</div>
+                    <Select value={String(idx)} onValueChange={(v) => setIdx(Number(v))}>
+                      <SelectTrigger className="h-7 text-xs tech-input"
+                        style={{ borderColor: getFaceColor(idx), color: getFaceColor(idx), fontWeight: 700 }}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {faces.map((f, i) => (
+                          <SelectItem key={i} value={String(i)}>
+                            <span style={{ color: getFaceColor(i) }}>{f.name}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
               </div>
-
               {faceAIdx !== faceBIdx ? (
-                <div
-                  className="rounded-lg p-3 text-center"
-                  style={{ background: "#ffffff", border: `1px solid #c7d2fe` }}
-                >
-                  <div className="text-xs mb-1" style={{ color: S.textMuted }}>
+                <div className="rounded-lg p-3 text-center"
+                  style={{ background: T.card, border: `1px solid ${T.borderMid}` }}>
+                  <div style={{ fontSize: 10, color: T.textMid, marginBottom: 4 }}>
                     <span style={{ color: getFaceColor(faceAIdx) }}>{faces[faceAIdx]?.name}</span>
                     {" ∩ "}
                     <span style={{ color: getFaceColor(faceBIdx) }}>{faces[faceBIdx]?.name}</span>
                   </div>
-                  <div
-                    className="text-3xl font-bold"
-                    style={{ color: S.amber, fontFamily: S.mono }}
-                  >
+                  <div style={{ fontSize: 30, fontWeight: 900, color: T.amber, fontFamily: T.mono, lineHeight: 1 }}>
                     {fmt(dihedralDeg, 2)}°
                   </div>
-                  <div className="text-xs mt-1" style={{ color: S.textFaint }}>
-                    ≈ {fmt(dihedralRad, 4)} {t.dihedralRad}
+                  <div style={{ fontSize: 10, color: T.textDim, marginTop: 4, fontFamily: T.mono }}>
+                    ≈ {fmt(dihedralRad, 4)} rad
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-center" style={{ color: S.textFaint }}>
-                  {t.dihedralHint}
-                </p>
+                <p style={{ fontSize: 10, textAlign: "center", color: T.textDim }}>{t.dihedralHint}</p>
               )}
             </section>
           )}
 
-          {/* ── Step transition ── */}
+          {/* Step transition */}
           <div className="mt-auto pt-2">
             {step === 1 ? (
-              <Button
-                onClick={() => setStep(2)}
-                disabled={points.length < 3}
-                className="w-full text-sm font-bold shadow-sm"
-                style={{
-                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                  color: "#ffffff",
-                  border: "none",
-                }}
-              >
-                {t.btnToStep2} <ArrowRight size={14} className="ml-1" />
-              </Button>
+              <button onClick={() => setStep(2)} disabled={points.length < 3}
+                className="w-full btn-cyan py-2 rounded-lg text-sm flex items-center justify-center gap-2 disabled:opacity-40">
+                {t.btnToStep2} <ArrowRight size={14} />
+              </button>
             ) : (
-              <Button
-                onClick={() => setStep(1)}
-                variant="outline"
-                className="w-full text-sm"
-                style={{ borderColor: S.accent, color: S.accent }}
-              >
-                <ArrowLeft size={14} className="mr-1" /> {t.btnBackStep1}
-              </Button>
+              <button onClick={() => setStep(1)}
+                className="w-full py-2 rounded-lg text-sm flex items-center justify-center gap-2"
+                style={{ border: `1px solid ${T.cyan}`, color: T.cyan, background: "transparent" }}>
+                <ArrowLeft size={14} /> {t.btnBackStep1}
+              </button>
             )}
           </div>
         </aside>
 
-        {/* ── Centre: diagram/viewer ── */}
-        <main className="flex-1 flex flex-col overflow-hidden" style={{ minWidth: 0 }}>
+        {/* ── Centre: diagram / viewer ── */}
+        <main className="flex-1 flex flex-col overflow-hidden" style={{ minWidth: 0, background: T.bg }}>
           {step === 1 ? (
             <div className="flex-1 relative" style={{ minHeight: 0 }}>
               <div className="absolute inset-0">
                 <BaseCanvas2D
-                  points={points}
+                  points={displayPoints}
                   onPointMove={movePoint}
                   showGrid={showGrid}
                   centers={centersResult}
@@ -632,23 +551,14 @@ export default function Home() {
                 />
               </div>
               <div className="absolute bottom-3 left-3 flex items-center gap-3">
-                <label
-                  className="flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ color: S.textMuted }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={showGrid}
-                    onChange={(e) => setShowGrid(e.target.checked)}
-                    className="w-3 h-3"
-                  />
+                <label className="flex items-center gap-1.5 cursor-pointer"
+                  style={{ fontSize: 11, color: T.textMid }}>
+                  <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} className="w-3 h-3" />
                   {t.canvas2DGrid}
                 </label>
               </div>
-              <div
-                className="absolute bottom-3 right-3 text-xs px-2 py-1 rounded"
-                style={{ background: "rgba(255,255,255,0.8)", color: S.textFaint }}
-              >
+              <div className="absolute bottom-3 right-3 px-2 py-1 rounded"
+                style={{ fontSize: 10, color: T.textDim, background: "rgba(10,14,26,0.7)" }}>
                 {t.canvas2DHint}
               </div>
             </div>
@@ -656,428 +566,355 @@ export default function Home() {
             <div className="flex-1" style={{ minHeight: 0 }}>
               {solidResult ? (
                 <SolidViewer
-                  points={points}
+                  points={displayPoints}
                   solidType={solidType}
                   height={height}
                   apexLabel={apexLabel}
                   faces={solidResult.faces}
-                  highlightFaceIndices={
-                    faceAIdx !== faceBIdx ? [faceAIdx, faceBIdx] : []
-                  }
+                  highlightFaceIndices={faceAIdx !== faceBIdx ? [faceAIdx, faceBIdx] : []}
                   onFaceClick={handleFaceClick}
                 />
               ) : (
-                <div
-                  className="flex items-center justify-center h-full text-sm"
-                  style={{ color: S.textFaint }}
-                >
-                  {t.viewerNeedPoints}
-                </div>
+                <div className="flex items-center justify-center h-full"
+                  style={{ fontSize: 13, color: T.textDim }}>{t.viewerNeedPoints}</div>
               )}
             </div>
           )}
-
           {step === 2 && (
-            <div
-              className="text-xs text-center py-1.5"
-              style={{
-                color: S.textFaint,
-                borderTop: `1px solid ${S.panelBorder}`,
-                background: S.panel,
-              }}
-            >
+            <div className="text-center py-1.5" style={{ fontSize: 10, color: T.textDim, borderTop: `1px solid ${T.borderDim}`, background: T.panel }}>
               {t.viewerHint}
             </div>
           )}
         </main>
 
         {/* ── Right panel: results ── */}
-        <aside
-          className="flex flex-col overflow-y-auto"
-          style={{
-            width: 320,
-            minWidth: 260,
-            background: S.panel,
-            borderLeft: `1px solid ${S.panelBorder}`,
-          }}
-        >
-          {step === 1 && baseResult ? (
-            <Tabs defaultValue="edges" className="flex-1 flex flex-col">
-              <TabsList className="grid grid-cols-4 m-2 mb-0">
-                <TabsTrigger value="edges" className="text-xs">{t.tab2DEdges}</TabsTrigger>
-                <TabsTrigger value="angles" className="text-xs">{t.tab2DAngles}</TabsTrigger>
-                <TabsTrigger value="area" className="text-xs">{t.tab2DArea}</TabsTrigger>
+        <aside className="flex flex-col overflow-y-auto"
+          style={{ width: 340, minWidth: 280, background: T.panel, borderLeft: `1px solid ${T.borderDim}` }}>
+
+          {step === 1 ? (
+            <Tabs defaultValue="steps" className="flex-1 flex flex-col">
+              <TabsList className="grid grid-cols-4 m-2 mb-0"
+                style={{ background: T.card, border: `1px solid ${T.borderDim}` }}>
+                <TabsTrigger value="steps" className="text-xs">{lang === "zh" ? "步驟" : "Steps"}</TabsTrigger>
+                <TabsTrigger value="results" className="text-xs">{lang === "zh" ? "結果" : "Results"}</TabsTrigger>
                 <TabsTrigger value="centers" className="text-xs">{t.tab2DCenters}</TabsTrigger>
+                <TabsTrigger value="area" className="text-xs">{t.tab2DArea}</TabsTrigger>
               </TabsList>
 
-              {/* Edges */}
-              <TabsContent value="edges" className="flex-1 overflow-y-auto p-3">
-                <ResultCard title={t.tab2DEdges} accent={S.accent}>
-                  {baseResult.edgeLengths.map((len, i) => (
-                    <ResultRow
-                      key={i}
-                      label={baseResult.edgeLabels[i]}
-                      value={fmt(len)}
-                      unit={t.unitLength}
-                    />
-                  ))}
-                  <Divider />
-                  <ResultRow
-                    label={t.labelPerimeter}
-                    value={fmt(baseResult.perimeter)}
-                    unit={t.unitLength}
-                    highlight
-                  />
-                </ResultCard>
-              </TabsContent>
-
-              {/* Angles */}
-              <TabsContent value="angles" className="flex-1 overflow-y-auto p-3">
-                <ResultCard title={t.tab2DAngles} accent={S.teal}>
-                  {baseResult.angles.map((ang, i) => (
-                    <ResultRow
-                      key={i}
-                      label={baseResult.angleLabels[i]}
-                      value={fmt(ang, 2)}
-                      unit={t.unitDeg}
-                    />
-                  ))}
-                  <Divider />
-                  <ResultRow
-                    label={t.labelAngleSum}
-                    value={fmt(baseResult.angles.reduce((s, a) => s + a, 0), 2)}
-                    unit={t.unitDeg}
-                    highlight
-                  />
-                </ResultCard>
-              </TabsContent>
-
-              {/* Area */}
-              <TabsContent value="area" className="flex-1 overflow-y-auto p-3">
-                <ResultCard title={t.tab2DArea} accent={S.amber}>
-                  <div className="text-center py-4">
-                    <div
-                      className="text-4xl font-bold mb-1"
-                      style={{ color: S.amber, fontFamily: S.mono }}
-                    >
-                      {fmt(baseResult.area)}
-                    </div>
-                    <div className="text-xs" style={{ color: S.textFaint }}>
-                      {t.unitAreaSq}
-                    </div>
-                    <div className="text-xs mt-2" style={{ color: S.textFaint }}>
-                      {t.formulaArea}
-                    </div>
+              {/* ── Steps tab ── */}
+              <TabsContent value="steps" className="flex-1 overflow-y-auto p-3">
+                {!solverResult || solverResult.steps.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-32 gap-2"
+                    style={{ color: T.textDim, fontSize: 12 }}>
+                    <div style={{ fontSize: 28, opacity: 0.3 }}>∑</div>
+                    {lang === "zh" ? "輸入已知邊長或角度以開始求解" : "Enter known sides or angles to solve"}
                   </div>
-                </ResultCard>
+                ) : (
+                  <div className="space-y-2">
+                    {solverResult.steps.map((step, si) => (
+                      <div key={si}
+                        style={{
+                          background: T.card, border: `1px solid ${T.borderDim}`,
+                          borderRadius: 8, overflow: "hidden",
+                        }}>
+                        {/* Step header */}
+                        <button
+                          className="w-full flex items-center justify-between px-3 py-2 transition-colors hover:bg-slate-800/50"
+                          onClick={() => setExpandedStep(expandedStep === si ? null : si)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div style={{
+                              width: 20, height: 20, borderRadius: "50%", fontSize: 10, fontWeight: 700,
+                              background: step.law === "cosine" ? T.cyan : step.law === "sine" ? T.amber : T.green,
+                              color: "#000d1a", display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>{si + 1}</div>
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: T.textHi, textAlign: "left" }}>
+                                {step.law === "cosine"
+                                  ? (lang === "zh" ? "餘弦定理" : "Cosine Rule")
+                                  : step.law === "sine"
+                                  ? (lang === "zh" ? "正弦定理" : "Sine Rule")
+                                  : step.law === "angle_sum" || step.law === "polygon_angle_sum"
+                                  ? (lang === "zh" ? "角度和" : "Angle Sum")
+                                  : (lang === "zh" ? "已知" : "Given")}
+                              </div>
+                              <div style={{ fontSize: 10, color: T.textMid, textAlign: "left" }}>{step.result}</div>
+                            </div>
+                          </div>
+                          {expandedStep === si
+                            ? <ChevronUp size={13} style={{ color: T.textDim }} />
+                            : <ChevronDown size={13} style={{ color: T.textDim }} />}
+                        </button>
+
+                        {/* LaTeX expansion */}
+                        {expandedStep === si && (
+                          <div style={{
+                            borderTop: `1px solid ${T.borderDim}`,
+                            padding: "12px 12px",
+                            background: "rgba(0,0,0,0.2)",
+                            overflowX: "auto",
+                          }}>
+                            <KaTeXRenderer latex={step.latex} block />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </TabsContent>
 
-              {/* Four Centers */}
-              <TabsContent value="centers" className="flex-1 overflow-y-auto p-3">
-                <div className="space-y-2">
-                  {/* Toggle buttons */}
-                  <div
-                    className="rounded-lg p-2.5"
-                    style={{ background: S.cardBg, border: `1px solid ${S.cardBorder}` }}
-                  >
-                    <div
-                      className="text-xs font-bold uppercase tracking-widest mb-2"
-                      style={{ color: S.textMuted }}
-                    >
-                      {t.sectionCenters}
-                    </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {CENTER_KEYS.map((key) => {
-                        const color = CENTER_COLORS[key];
-                        const active = centerVis[key];
-                        const labels: Record<CenterKey, string> = {
-                          centroid: t.centerCentroid,
-                          circumcenter: t.centerCircumcenter,
-                          incenter: t.centerIncenter,
-                          orthocenter: t.centerOrthocenter,
-                        };
-                        return (
-                          <button
-                            key={key}
-                            onClick={() => toggleCenter(key)}
-                            className="flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-all"
-                            style={{
-                              background: active ? color + "18" : S.cardBg,
-                              border: `1.5px solid ${active ? color : S.cardBorder}`,
-                              color: active ? color : S.textMuted,
-                            }}
-                          >
-                            <span
-                              className="w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                              style={{
-                                background: active ? color : S.panelBorder2,
-                                color: active ? "#fff" : S.textFaint,
-                              }}
-                            >
-                              {CENTER_SYMBOL[key]}
-                            </span>
-                            {labels[key]}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Circle toggles */}
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        onClick={() => toggleCenter("circumcircle")}
-                        className="flex-1 text-xs py-1 rounded-md transition-all"
-                        style={{
-                          background: centerVis.circumcircle ? CENTER_COLORS.circumcenter + "18" : S.cardBg,
-                          border: `1px solid ${centerVis.circumcircle ? CENTER_COLORS.circumcenter : S.cardBorder}`,
-                          color: centerVis.circumcircle ? CENTER_COLORS.circumcenter : S.textMuted,
-                        }}
-                      >
-                        ○ {t.showCircumcircle}
-                      </button>
-                      <button
-                        onClick={() => toggleCenter("incircle")}
-                        className="flex-1 text-xs py-1 rounded-md transition-all"
-                        style={{
-                          background: centerVis.incircle ? CENTER_COLORS.incenter + "18" : S.cardBg,
-                          border: `1px solid ${centerVis.incircle ? CENTER_COLORS.incenter : S.cardBorder}`,
-                          color: centerVis.incircle ? CENTER_COLORS.incenter : S.textMuted,
-                        }}
-                      >
-                        ○ {t.showIncircle}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Center data */}
-                  {centersResult && (
+              {/* ── Results tab ── */}
+              <TabsContent value="results" className="flex-1 overflow-y-auto p-3">
+                <TechCard title={lang === "zh" ? "邊長" : "Side Lengths"} color={T.cyan}>
+                  {points.map((_, i) => {
+                    const lbl = sideLabel(i);
+                    const sv = solverResult?.sides[i];
+                    return (
+                      <TechRow key={i} label={lbl} color={getFaceColor(i + 2)}
+                        value={sv?.value !== null && sv?.value !== undefined ? fmt(sv.value) : "—"}
+                        state={sv?.state ?? "unknown"} />
+                    );
+                  })}
+                  {baseResult && (
                     <>
-                      {points.length > 3 && (
-                        <p className="text-xs px-1" style={{ color: S.textFaint }}>
-                          {t.centerNote}
-                        </p>
-                      )}
-                      {points.length === 3 && (
-                        <p className="text-xs px-1" style={{ color: S.teal }}>
-                          ✓ {t.centerNoteTriangle}
-                        </p>
-                      )}
-
-                      {/* Centroid */}
-                      <CenterCard
-                        symbol="G"
-                        name={t.centerCentroid}
-                        desc={t.centerCentroidDesc}
-                        color={CENTER_COLORS.centroid}
-                        pt={centersResult.centroid}
-                        active={centerVis.centroid}
-                        onToggle={() => toggleCenter("centroid")}
-                      />
-
-                      {/* Circumcenter */}
-                      <CenterCard
-                        symbol="O"
-                        name={t.centerCircumcenter}
-                        desc={t.centerCircumcenterDesc}
-                        color={CENTER_COLORS.circumcenter}
-                        pt={centersResult.circumcenter}
-                        active={centerVis.circumcenter}
-                        onToggle={() => toggleCenter("circumcenter")}
-                        extra={
-                          centersResult.circumradius !== null
-                            ? `${t.circumradius}: ${fmtShort(centersResult.circumradius)}`
-                            : undefined
-                        }
-                      />
-
-                      {/* Incenter */}
-                      <CenterCard
-                        symbol="I"
-                        name={t.centerIncenter}
-                        desc={t.centerIncenterDesc}
-                        color={CENTER_COLORS.incenter}
-                        pt={centersResult.incenter}
-                        active={centerVis.incenter}
-                        onToggle={() => toggleCenter("incenter")}
-                        extra={
-                          centersResult.inradius !== null
-                            ? `${t.inradius}: ${fmtShort(centersResult.inradius)}`
-                            : undefined
-                        }
-                      />
-
-                      {/* Orthocenter */}
-                      <CenterCard
-                        symbol="H"
-                        name={t.centerOrthocenter}
-                        desc={t.centerOrthocenterDesc}
-                        color={CENTER_COLORS.orthocenter}
-                        pt={centersResult.orthocenter}
-                        active={centerVis.orthocenter}
-                        onToggle={() => toggleCenter("orthocenter")}
-                      />
+                      <div style={{ borderTop: `1px solid ${T.borderDim}`, margin: "6px 0" }} />
+                      <TechRow label={lang === "zh" ? "周長" : "Perimeter"} color={T.amber}
+                        value={fmt(baseResult.perimeter)} state="solved" highlight />
                     </>
                   )}
+                </TechCard>
+
+                <div style={{ height: 8 }} />
+
+                <TechCard title={lang === "zh" ? "角度" : "Angles"} color={T.amber}>
+                  {points.map((p, i) => {
+                    const av = solverResult?.angles[i];
+                    return (
+                      <TechRow key={i} label={`∠${p.label}`} color={getFaceColor(i + 2)}
+                        value={av?.value !== null && av?.value !== undefined ? `${fmt(av.value, 2)}°` : "—"}
+                        state={av?.state ?? "unknown"} />
+                    );
+                  })}
+                </TechCard>
+              </TabsContent>
+
+              {/* ── Centers tab ── */}
+              <TabsContent value="centers" className="flex-1 overflow-y-auto p-3">
+                <div style={{ fontSize: 10, color: T.textDim, marginBottom: 8 }}>
+                  {points.length === 3
+                    ? (lang === "zh" ? "✓ 三角形精確計算" : "✓ Exact for triangle")
+                    : (lang === "zh" ? "多邊形近似值" : "Approximate for polygon")}
                 </div>
+
+                {/* Toggle grid */}
+                <div className="grid grid-cols-2 gap-1.5 mb-3">
+                  {CENTER_KEYS.map((key) => {
+                    const color = CENTER_COLORS[key];
+                    const active = centerVis[key];
+                    const names: Record<CenterKey, string> = {
+                      centroid: t.centerCentroid, circumcenter: t.centerCircumcenter,
+                      incenter: t.centerIncenter, orthocenter: t.centerOrthocenter,
+                    };
+                    return (
+                      <button key={key} onClick={() => toggleCenter(key)}
+                        className="flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-all"
+                        style={{
+                          background: active ? color + "15" : T.card,
+                          border: `1.5px solid ${active ? color : T.borderMid}`,
+                          color: active ? color : T.textMid, fontSize: 11, fontWeight: 600,
+                        }}>
+                        <span style={{
+                          width: 18, height: 18, borderRadius: "50%", fontSize: 10, fontWeight: 700,
+                          background: active ? color : T.borderHi, color: active ? "#000d1a" : T.textDim,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>{CENTER_SYMBOL[key]}</span>
+                        {names[key]}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Circle toggles */}
+                <div className="flex gap-2 mb-3">
+                  {(["circumcircle", "incircle"] as const).map((key) => {
+                    const color = key === "circumcircle" ? CENTER_COLORS.circumcenter : CENTER_COLORS.incenter;
+                    const active = centerVis[key];
+                    const lbl = key === "circumcircle" ? t.showCircumcircle : t.showIncircle;
+                    return (
+                      <button key={key} onClick={() => toggleCenter(key)}
+                        className="flex-1 py-1.5 rounded-md transition-all text-xs"
+                        style={{
+                          background: active ? color + "15" : T.card,
+                          border: `1px solid ${active ? color : T.borderMid}`,
+                          color: active ? color : T.textMid,
+                        }}>○ {lbl}</button>
+                    );
+                  })}
+                </div>
+
+                {/* Center data cards */}
+                {centersResult && CENTER_KEYS.map((key) => {
+                  const pt = centersResult[key];
+                  const color = CENTER_COLORS[key];
+                  const active = centerVis[key];
+                  const names: Record<CenterKey, string> = {
+                    centroid: t.centerCentroid, circumcenter: t.centerCircumcenter,
+                    incenter: t.centerIncenter, orthocenter: t.centerOrthocenter,
+                  };
+                  const descs: Record<CenterKey, string> = {
+                    centroid: t.centerCentroidDesc, circumcenter: t.centerCircumcenterDesc,
+                    incenter: t.centerIncenterDesc, orthocenter: t.centerOrthocenterDesc,
+                  };
+                  const extra = key === "circumcenter" && centersResult.circumradius !== null
+                    ? `R = ${centersResult.circumradius.toFixed(3)}`
+                    : key === "incenter" && centersResult.inradius !== null
+                    ? `r = ${centersResult.inradius.toFixed(3)}`
+                    : null;
+                  return (
+                    <div key={key} onClick={() => toggleCenter(key)} className="mb-2 rounded-lg p-2.5 cursor-pointer transition-all"
+                      style={{ background: active ? color + "0d" : T.card, border: `1.5px solid ${active ? color : T.borderDim}` }}>
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span style={{ width: 18, height: 18, borderRadius: "50%", fontSize: 10, fontWeight: 700,
+                            background: active ? color : T.borderHi, color: active ? "#000d1a" : T.textDim,
+                            display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                            {CENTER_SYMBOL[key]}
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: active ? color : T.textHi }}>{names[key]}</span>
+                        </div>
+                        <div style={{ width: 14, height: 14, borderRadius: "50%", border: `2px solid ${active ? color : T.borderMid}`,
+                          display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {active && <div style={{ width: 7, height: 7, borderRadius: "50%", background: color }} />}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 10, color: T.textDim, marginBottom: 4 }}>{descs[key]}</div>
+                      {pt && (
+                        <div style={{ fontSize: 11, color: active ? color : T.textMid, fontFamily: T.mono }}>
+                          ({pt.x.toFixed(3)}, {pt.y.toFixed(3)})
+                        </div>
+                      )}
+                      {extra && <div style={{ fontSize: 10, color: active ? color + "cc" : T.textDim, marginTop: 2 }}>{extra}</div>}
+                    </div>
+                  );
+                })}
+              </TabsContent>
+
+              {/* ── Area tab ── */}
+              <TabsContent value="area" className="flex-1 overflow-y-auto p-3">
+                <TechCard title={t.tab2DArea} color={T.amber}>
+                  {baseResult ? (
+                    <div className="text-center py-4">
+                      <div style={{ fontSize: 42, fontWeight: 900, color: T.amber, fontFamily: T.mono, lineHeight: 1 }}>
+                        {fmt(baseResult.area)}
+                      </div>
+                      <div style={{ fontSize: 11, color: T.textDim, marginTop: 4 }}>{t.unitAreaSq}</div>
+                      <div style={{ fontSize: 10, color: T.textDim, marginTop: 6 }}>{t.formulaArea}</div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: T.textDim, textAlign: "center", padding: "16px 0" }}>
+                      {lang === "zh" ? "需先求解多邊形" : "Solve polygon first"}
+                    </div>
+                  )}
+                </TechCard>
               </TabsContent>
             </Tabs>
+
           ) : step === 2 && solidResult ? (
             <Tabs defaultValue="volume" className="flex-1 flex flex-col">
-              <TabsList className="grid grid-cols-3 m-2 mb-0">
+              <TabsList className="grid grid-cols-3 m-2 mb-0"
+                style={{ background: T.card, border: `1px solid ${T.borderDim}` }}>
                 <TabsTrigger value="volume" className="text-xs">{t.tabVolume}</TabsTrigger>
                 <TabsTrigger value="faces" className="text-xs">{t.tabFaces}</TabsTrigger>
                 <TabsTrigger value="matrix" className="text-xs">{t.tabDihedralMatrix}</TabsTrigger>
               </TabsList>
 
-              {/* Volume */}
               <TabsContent value="volume" className="flex-1 overflow-y-auto p-3">
-                <ResultCard title={t.tabVolume} accent={S.amber}>
+                <TechCard title={t.tabVolume} color={T.amber}>
                   <div className="text-center py-4">
-                    <div
-                      className="text-4xl font-bold mb-1"
-                      style={{ color: S.amber, fontFamily: S.mono }}
-                    >
+                    <div style={{ fontSize: 42, fontWeight: 900, color: T.amber, fontFamily: T.mono, lineHeight: 1 }}>
                       {fmt(solidResult.volume)}
                     </div>
-                    <div className="text-xs" style={{ color: S.textFaint }}>
-                      {t.unitVolCube}
-                    </div>
-                    <div className="text-xs mt-2" style={{ color: S.textFaint }}>
+                    <div style={{ fontSize: 11, color: T.textDim, marginTop: 4 }}>{t.unitVolCube}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, marginTop: 6 }}>
                       {solidType === "prism" ? t.formulaPrism : t.formulaPyramid}
                     </div>
                   </div>
-                  <Divider />
-                  <ResultRow
-                    label={t.labelBaseArea}
-                    value={fmt(baseResult?.area ?? 0)}
-                    unit={t.unitAreaSq}
-                  />
-                  <ResultRow label={t.labelHeightH} value={fmt(height)} unit={t.unitLength} />
-                  <Divider />
-                  <div className="text-xs mb-1" style={{ color: S.textMuted }}>
-                    {t.labelLateralEdges}
-                  </div>
+                  <div style={{ borderTop: `1px solid ${T.borderDim}`, margin: "8px 0" }} />
+                  <TechRow label={t.labelBaseArea} value={fmt(baseResult?.area ?? 0)} state="solved" />
+                  <TechRow label={t.labelHeightH} value={fmt(height)} state="given" />
+                  <div style={{ borderTop: `1px solid ${T.borderDim}`, margin: "8px 0" }} />
+                  <div style={{ fontSize: 10, color: T.textMid, marginBottom: 4 }}>{t.labelLateralEdges}</div>
                   {solidResult.lateralEdgeLengths.map((len, i) => (
-                    <ResultRow
-                      key={i}
-                      label={solidResult.lateralEdgeLabels[i]}
-                      value={fmt(len)}
-                      unit={t.unitLength}
-                    />
+                    <TechRow key={i} label={solidResult.lateralEdgeLabels[i]} value={fmt(len)} state="solved" />
                   ))}
-                </ResultCard>
+                </TechCard>
               </TabsContent>
 
-              {/* Faces */}
               <TabsContent value="faces" className="flex-1 overflow-y-auto p-3">
-                <ResultCard title={t.tabFaces} accent={S.teal}>
+                <TechCard title={t.tabFaces} color={T.cyan}>
                   {solidResult.faces.map((face, i) => {
                     const isHL = faceAIdx === i || faceBIdx === i;
                     return (
-                      <div
-                        key={i}
+                      <div key={i} onClick={() => handleFaceClick(i)}
                         className="flex items-center justify-between py-1.5 px-2 rounded-md mb-1 cursor-pointer transition-all"
-                        onClick={() => handleFaceClick(i)}
                         style={{
-                          background: isHL ? getFaceColor(i) + "14" : S.cardBg,
-                          border: `1.5px solid ${isHL ? getFaceColor(i) : S.cardBorder}`,
-                        }}
-                      >
+                          background: isHL ? getFaceColor(i) + "18" : T.card,
+                          border: `1.5px solid ${isHL ? getFaceColor(i) : T.borderDim}`,
+                        }}>
                         <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded-sm flex-shrink-0"
-                            style={{ background: getFaceColor(i) }}
-                          />
-                          <span
-                            className="text-xs font-bold"
-                            style={{ color: getFaceColor(i) }}
-                          >
-                            {face.name}
-                          </span>
-                          <span className="text-xs" style={{ color: S.textFaint }}>
-                            ({face.type === "base"
-                              ? (lang === "zh" ? "底" : "base")
-                              : face.type === "top"
-                              ? (lang === "zh" ? "頂" : "top")
+                          <div style={{ width: 10, height: 10, borderRadius: 2, background: getFaceColor(i) }} />
+                          <span style={{ fontSize: 11, fontWeight: 700, color: getFaceColor(i) }}>{face.name}</span>
+                          <span style={{ fontSize: 10, color: T.textDim }}>
+                            ({face.type === "base" ? (lang === "zh" ? "底" : "base")
+                              : face.type === "top" ? (lang === "zh" ? "頂" : "top")
                               : (lang === "zh" ? "側" : "side")})
                           </span>
                         </div>
-                        <span
-                          className="text-xs"
-                          style={{ color: S.amber, fontFamily: S.mono }}
-                        >
-                          {fmtShort(solidResult.faceAreas[i])} {t.unitAreaSq}
+                        <span style={{ fontSize: 11, color: T.amber, fontFamily: T.mono }}>
+                          {solidResult.faceAreas[i].toFixed(2)}
                         </span>
                       </div>
                     );
                   })}
-                </ResultCard>
+                </TechCard>
               </TabsContent>
 
-              {/* Dihedral matrix */}
               <TabsContent value="matrix" className="flex-1 overflow-y-auto p-3">
-                <ResultCard title={t.tabDihedralMatrix} accent={S.accent}>
-                  <p className="text-xs mb-2" style={{ color: S.textFaint }}>
-                    {t.dihedralMatrixHint}
-                  </p>
-                  <div className="overflow-x-auto">
-                    <table className="text-xs w-full border-collapse">
+                <TechCard title={t.tabDihedralMatrix} color={T.violet}>
+                  <p style={{ fontSize: 10, color: T.textDim, marginBottom: 8 }}>{t.dihedralMatrixHint}</p>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                       <thead>
                         <tr>
-                          <th
-                            className="p-1 text-left"
-                            style={{ color: S.textFaint, borderBottom: `1px solid ${S.cardBorder}` }}
-                          >
+                          <th style={{ padding: "4px 6px", color: T.textDim, borderBottom: `1px solid ${T.borderDim}`, textAlign: "left" }}>
                             {t.colFace}
                           </th>
                           {solidResult.faces.map((f, i) => (
-                            <th
-                              key={i}
-                              className="p-1 text-center"
-                              style={{
-                                color: getFaceColor(i),
-                                borderBottom: `1px solid ${S.cardBorder}`,
-                                minWidth: 40,
-                                fontFamily: S.mono,
-                              }}
-                            >
-                              {f.name}
-                            </th>
+                            <th key={i} style={{
+                              padding: "4px 6px", color: getFaceColor(i), textAlign: "center",
+                              borderBottom: `1px solid ${T.borderDim}`, fontFamily: T.mono, minWidth: 44,
+                            }}>{f.name}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {solidResult.faces.map((rowFace, ri) => (
                           <tr key={ri}>
-                            <td
-                              className="p-1 font-bold"
-                              style={{ color: getFaceColor(ri) }}
-                            >
-                              {rowFace.name}
-                            </td>
+                            <td style={{ padding: "3px 6px", fontWeight: 700, color: getFaceColor(ri) }}>{rowFace.name}</td>
                             {solidResult.faces.map((_, ci) => {
                               const val = solidResult.dihedralMatrix[ri][ci];
-                              const isSelected =
-                                (ri === faceAIdx && ci === faceBIdx) ||
-                                (ri === faceBIdx && ci === faceAIdx);
+                              const isSel = (ri === faceAIdx && ci === faceBIdx) || (ri === faceBIdx && ci === faceAIdx);
                               return (
-                                <td
-                                  key={ci}
-                                  className="p-1 text-center rounded cursor-pointer transition-all"
-                                  onClick={() => {
-                                    if (ri !== ci) {
-                                      setFaceAIdx(ri);
-                                      setFaceBIdx(ci);
-                                    }
-                                  }}
+                                <td key={ci}
+                                  onClick={() => { if (ri !== ci) { setFaceAIdx(ri); setFaceBIdx(ci); } }}
                                   style={{
-                                    color: ri === ci ? S.textFaint : isSelected ? "#ffffff" : S.text,
-                                    background: isSelected ? S.amber : ri === ci ? "transparent" : "transparent",
-                                    fontFamily: S.mono,
-                                    fontWeight: isSelected ? 700 : 400,
-                                  }}
-                                >
-                                  {ri === ci ? "—" : `${fmtShort(val)}°`}
+                                    padding: "3px 6px", textAlign: "center", cursor: ri !== ci ? "pointer" : "default",
+                                    color: ri === ci ? T.textDim : isSel ? "#000d1a" : T.textHi,
+                                    background: isSel ? T.amber : "transparent",
+                                    fontFamily: T.mono, fontWeight: isSel ? 700 : 400,
+                                    borderRadius: 3,
+                                  }}>
+                                  {ri === ci ? "—" : `${val.toFixed(1)}°`}
                                 </td>
                               );
                             })}
@@ -1086,14 +923,11 @@ export default function Home() {
                       </tbody>
                     </table>
                   </div>
-                </ResultCard>
+                </TechCard>
               </TabsContent>
             </Tabs>
           ) : (
-            <div
-              className="flex items-center justify-center h-full text-sm"
-              style={{ color: S.textFaint }}
-            >
+            <div className="flex items-center justify-center h-full" style={{ fontSize: 13, color: T.textDim }}>
               {t.viewerNeedPoints}
             </div>
           )}
@@ -1105,141 +939,43 @@ export default function Home() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ResultCard({
-  title,
-  children,
-  accent = "#6366f1",
-}: {
-  title: string;
-  children: React.ReactNode;
-  accent?: string;
-}) {
+function TechCard({ title, children, color = "#00d4ff" }: { title: string; children: React.ReactNode; color?: string }) {
   return (
-    <div
-      className="rounded-xl p-3"
-      style={{
-        background: "#f8fafc",
-        border: "1px solid #e2e8f0",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-      }}
-    >
-      <div
-        className="text-xs font-bold uppercase tracking-widest mb-2 pb-1.5 border-b"
-        style={{ color: accent, borderColor: "#e2e8f0" }}
-      >
-        {title}
-      </div>
+    <div style={{ background: "#141d35", border: "1px solid #1e2d4a", borderRadius: 10, padding: 12 }}>
+      <div style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase",
+        color, borderBottom: "1px solid #1e2d4a", paddingBottom: 6, marginBottom: 8,
+      }}>{title}</div>
       {children}
     </div>
   );
 }
 
-function ResultRow({
-  label,
-  value,
-  unit,
-  highlight = false,
+function TechRow({
+  label, value, state = "unknown", color, highlight = false,
 }: {
-  label: string;
-  value: string;
-  unit: string;
-  highlight?: boolean;
+  label: string; value: string; state?: "given" | "solved" | "unknown";
+  color?: string; highlight?: boolean;
 }) {
+  const stateColor = state === "given" ? "#00d4ff" : state === "solved" ? "#00ff9d" : "#3d5070";
   return (
     <div className="flex items-center justify-between py-0.5">
-      <span className="text-xs" style={{ color: highlight ? "#0f172a" : "#64748b" }}>
-        {label}
-      </span>
-      <span
-        className="text-xs"
-        style={{
-          color: highlight ? "#f59e0b" : "#0f172a",
-          fontFamily: "'JetBrains Mono', monospace",
+      <span style={{ fontSize: 11, color: color ?? "#8899bb" }}>{label}</span>
+      <div className="flex items-center gap-1.5">
+        <span style={{
+          fontSize: 11, fontFamily: "'JetBrains Mono', monospace",
+          color: highlight ? "#ffb800" : state === "unknown" ? "#3d5070" : "#e8f0ff",
           fontWeight: highlight ? 700 : 400,
-        }}
-      >
-        {value}
-        {unit && (
-          <span style={{ color: "#94a3b8", marginLeft: 2, fontFamily: "inherit" }}>
-            {unit}
-          </span>
+        }}>{value}</span>
+        {state !== "unknown" && (
+          <span style={{
+            fontSize: 9, padding: "1px 5px", borderRadius: 3,
+            background: state === "given" ? "rgba(0,212,255,0.1)" : "rgba(0,255,157,0.1)",
+            border: `1px solid ${stateColor}44`, color: stateColor,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>{state === "given" ? "given" : "solved"}</span>
         )}
-      </span>
-    </div>
-  );
-}
-
-function Divider() {
-  return (
-    <div className="border-t my-2" style={{ borderColor: "#e2e8f0" }} />
-  );
-}
-
-function CenterCard({
-  symbol,
-  name,
-  desc,
-  color,
-  pt,
-  active,
-  onToggle,
-  extra,
-}: {
-  symbol: string;
-  name: string;
-  desc: string;
-  color: string;
-  pt: { x: number; y: number } | null | undefined;
-  active: boolean;
-  onToggle: () => void;
-  extra?: string;
-}) {
-  return (
-    <div
-      className="rounded-lg p-2.5 cursor-pointer transition-all"
-      onClick={onToggle}
-      style={{
-        background: active ? color + "0e" : "#f8fafc",
-        border: `1.5px solid ${active ? color : "#e2e8f0"}`,
-      }}
-    >
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <span
-            className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold"
-            style={{ background: active ? color : "#e2e8f0", color: active ? "#fff" : "#94a3b8" }}
-          >
-            {symbol}
-          </span>
-          <span className="text-xs font-bold" style={{ color: active ? color : "#334155" }}>
-            {name}
-          </span>
-        </div>
-        <div
-          className="w-4 h-4 rounded-full border-2 flex items-center justify-center"
-          style={{ borderColor: active ? color : "#cbd5e1" }}
-        >
-          {active && (
-            <div className="w-2 h-2 rounded-full" style={{ background: color }} />
-          )}
-        </div>
       </div>
-      <div className="text-xs mb-1" style={{ color: "#94a3b8" }}>
-        {desc}
-      </div>
-      {pt && (
-        <div
-          className="text-xs font-mono"
-          style={{ color: active ? color : "#64748b", fontFamily: "'JetBrains Mono', monospace" }}
-        >
-          ({pt.x.toFixed(3)}, {pt.y.toFixed(3)})
-        </div>
-      )}
-      {extra && (
-        <div className="text-xs mt-0.5" style={{ color: active ? color + "cc" : "#94a3b8" }}>
-          {extra}
-        </div>
-      )}
     </div>
   );
 }

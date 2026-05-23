@@ -1,12 +1,6 @@
 /**
  * BaseCanvas2D — Interactive 2D canvas for the base polygon
- * Elegant white tech theme (light background, coloured vertices)
- * Supports:
- * - Draggable named vertices
- * - Edge labels, interior angle arcs
- * - Optional display of four special centers:
- *   centroid (形心), circumcenter (外心), incenter (內心), orthocenter (垂心)
- * - Circumcircle and incircle overlays
+ * Deep tech dark theme: navy bg, cyan grid, coloured vertices
  */
 import { useRef, useEffect, useCallback } from "react";
 import type { NamedPoint, Point2D, CentersResult } from "@/lib/geometry";
@@ -27,40 +21,10 @@ interface BaseCanvas2DProps {
   showGrid?: boolean;
   centers?: CentersResult | null;
   centerVisibility?: CenterVisibility;
-  width?: number;
-  height?: number;
 }
 
 const VERTEX_RADIUS = 7;
-const DRAG_HIT = 14;
-
-function worldToCanvas(
-  wx: number, wy: number, scale: number, ox: number, oy: number
-): [number, number] {
-  return [ox + wx * scale, oy - wy * scale];
-}
-
-function canvasToWorld(
-  cx: number, cy: number, scale: number, ox: number, oy: number
-): [number, number] {
-  return [(cx - ox) / scale, (oy - cy) / scale];
-}
-
-// Draw a small cross marker
-function drawCross(
-  ctx: CanvasRenderingContext2D,
-  cx: number, cy: number,
-  size: number, color: string, lineWidth = 2
-) {
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
-  ctx.beginPath();
-  ctx.moveTo(cx - size, cy);
-  ctx.lineTo(cx + size, cy);
-  ctx.moveTo(cx, cy - size);
-  ctx.lineTo(cx, cy + size);
-  ctx.stroke();
-}
+const DRAG_HIT = 16;
 
 export default function BaseCanvas2D({
   points,
@@ -68,222 +32,182 @@ export default function BaseCanvas2D({
   showGrid = true,
   centers,
   centerVisibility,
-  width = 600,
-  height = 480,
 }: BaseCanvas2DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragIdx = useRef<number>(-1);
   const scaleRef = useRef<number>(50);
-  const originRef = useRef<[number, number]>([width / 2, height / 2]);
+  const originRef = useRef<[number, number]>([300, 240]);
 
   const computeTransform = useCallback(() => {
-    if (points.length === 0) return;
+    const canvas = canvasRef.current;
+    if (!canvas || points.length === 0) return;
+    const W = canvas.width, H = canvas.height;
     const xs = points.map((p) => p.x);
     const ys = points.map((p) => p.y);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    const rangeX = maxX - minX || 2;
-    const rangeY = maxY - minY || 2;
-    const pad = 70;
-    const scale = Math.min(
-      (width - pad * 2) / rangeX,
-      (height - pad * 2) / rangeY,
-      90
-    );
+    const minX = Math.min(...xs, 0) - 1;
+    const maxX = Math.max(...xs, 0) + 1;
+    const minY = Math.min(...ys, 0) - 1;
+    const maxY = Math.max(...ys, 0) + 1;
+    const rangeX = maxX - minX || 4;
+    const rangeY = maxY - minY || 4;
+    const pad = 72;
+    const scale = Math.min((W - pad * 2) / rangeX, (H - pad * 2) / rangeY, 100);
     scaleRef.current = scale;
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
-    originRef.current = [width / 2 - cx * scale, height / 2 + cy * scale];
-  }, [points, width, height]);
+    originRef.current = [W / 2 - cx * scale, H / 2 + cy * scale];
+  }, [points]);
+
+  const w2c = (x: number, y: number): [number, number] => {
+    const [ox, oy] = originRef.current;
+    const s = scaleRef.current;
+    return [ox + x * s, oy - y * s];
+  };
+  const c2w = (cx: number, cy: number): [number, number] => {
+    const [ox, oy] = originRef.current;
+    const s = scaleRef.current;
+    return [(cx - ox) / s, (oy - cy) / s];
+  };
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    const scale = scaleRef.current;
-    const [ox, oy] = originRef.current;
+    const W = canvas.width, H = canvas.height;
     const n = points.length;
 
-    // ── Background ────────────────────────────────────────────────────────
-    ctx.fillStyle = "#f8fafc";
-    ctx.fillRect(0, 0, width, height);
+    // Background
+    ctx.fillStyle = "#0a0e1a";
+    ctx.fillRect(0, 0, W, H);
 
-    // ── Grid ──────────────────────────────────────────────────────────────
+    // Grid
     if (showGrid) {
-      const step = scale;
-      ctx.strokeStyle = "#e2e8f0";
+      const s = scaleRef.current;
+      const [ox, oy] = originRef.current;
+      ctx.strokeStyle = "#141d35";
       ctx.lineWidth = 1;
-      const startX = Math.floor((0 - ox) / step) * step + ox;
-      for (let x = startX; x < width; x += step) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+      for (let x = ox % s; x < W; x += s) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
       }
-      const startY = Math.floor((0 - oy) / step) * step + oy;
-      for (let y = startY; y < height; y += step) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+      for (let y = oy % s; y < H; y += s) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
       }
-
       // Axes
-      ctx.strokeStyle = "#cbd5e1";
+      ctx.strokeStyle = "#1e2d4a";
       ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, height); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(width, oy); ctx.stroke();
-
+      ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke();
       // Axis labels
-      ctx.fillStyle = "#94a3b8";
-      ctx.font = "12px 'Space Grotesk', sans-serif";
-      ctx.fillText("x", width - 16, oy - 8);
-      ctx.fillText("y", ox + 8, 16);
-      ctx.fillText("O", ox + 6, oy + 16);
-
-      // Tick marks with values
-      ctx.font = "10px 'JetBrains Mono', monospace";
-      ctx.fillStyle = "#94a3b8";
-      for (let x = startX; x < width; x += step) {
-        const wx = Math.round((x - ox) / scale * 10) / 10;
-        if (wx !== 0) ctx.fillText(String(wx), x - 6, oy + 14);
+      ctx.fillStyle = "#2e4070";
+      ctx.font = "11px 'Space Grotesk', sans-serif";
+      ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+      ctx.fillText("x", W - 4, oy - 4);
+      ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText("y", ox + 4, 4);
+      // Tick values
+      ctx.font = "9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = "#2e4070";
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      for (let x = ox % s; x < W; x += s) {
+        const wx = Math.round((x - ox) / s);
+        if (wx !== 0) ctx.fillText(String(wx), x, oy + 3);
       }
-      for (let y = startY; y < height; y += step) {
-        const wy = Math.round((oy - y) / scale * 10) / 10;
-        if (wy !== 0) ctx.fillText(String(wy), ox + 6, y + 4);
+      ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      for (let y = oy % s; y < H; y += s) {
+        const wy = Math.round((oy - y) / s);
+        if (wy !== 0) ctx.fillText(String(wy), ox - 3, y);
       }
     }
 
     if (n < 2) return;
 
-    // ── Circumcircle ──────────────────────────────────────────────────────
-    if (
-      centerVisibility?.circumcircle &&
-      centers?.circumcenter &&
-      centers.circumradius !== null
-    ) {
-      const [ccx, ccy] = worldToCanvas(
-        centers.circumcenter.x, centers.circumcenter.y, scale, ox, oy
-      );
-      const cr = centers.circumradius * scale;
-      ctx.beginPath();
-      ctx.arc(ccx, ccy, cr, 0, Math.PI * 2);
-      ctx.strokeStyle = CENTER_COLORS.circumcenter + "88";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([6, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    // Circumcircle
+    if (centerVisibility?.circumcircle && centers?.circumcenter && centers.circumradius) {
+      const [ccx, ccy] = w2c(centers.circumcenter.x, centers.circumcenter.y);
+      const r = centers.circumradius * scaleRef.current;
+      ctx.beginPath(); ctx.arc(ccx, ccy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = CENTER_COLORS.circumcenter + "55";
+      ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
     }
 
-    // ── Incircle ──────────────────────────────────────────────────────────
-    if (
-      centerVisibility?.incircle &&
-      centers?.incenter &&
-      centers.inradius !== null
-    ) {
-      const [icx, icy] = worldToCanvas(
-        centers.incenter.x, centers.incenter.y, scale, ox, oy
-      );
-      const ir = centers.inradius * scale;
-      ctx.beginPath();
-      ctx.arc(icx, icy, ir, 0, Math.PI * 2);
-      ctx.strokeStyle = CENTER_COLORS.incenter + "88";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    // Incircle
+    if (centerVisibility?.incircle && centers?.incenter && centers.inradius) {
+      const [icx, icy] = w2c(centers.incenter.x, centers.incenter.y);
+      const r = centers.inradius * scaleRef.current;
+      ctx.beginPath(); ctx.arc(icx, icy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = CENTER_COLORS.incenter + "55";
+      ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
     }
 
-    // ── Polygon fill ──────────────────────────────────────────────────────
+    // Polygon fill
     ctx.beginPath();
-    const [fx, fy] = worldToCanvas(points[0].x, points[0].y, scale, ox, oy);
+    const [fx, fy] = w2c(points[0].x, points[0].y);
     ctx.moveTo(fx, fy);
     for (let i = 1; i < n; i++) {
-      const [px, py] = worldToCanvas(points[i].x, points[i].y, scale, ox, oy);
+      const [px, py] = w2c(points[i].x, points[i].y);
       ctx.lineTo(px, py);
     }
     ctx.closePath();
-    ctx.fillStyle = "rgba(99, 102, 241, 0.07)";
+    ctx.fillStyle = "rgba(0,212,255,0.06)";
     ctx.fill();
 
-    // ── Edges ─────────────────────────────────────────────────────────────
+    // Edges + labels
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
-      const [ax, ay] = worldToCanvas(points[i].x, points[i].y, scale, ox, oy);
-      const [bx, by] = worldToCanvas(points[j].x, points[j].y, scale, ox, oy);
-
-      ctx.strokeStyle = "#6366f1";
-      ctx.lineWidth = 2;
+      const [ax, ay] = w2c(points[i].x, points[i].y);
+      const [bx, by] = w2c(points[j].x, points[j].y);
+      ctx.strokeStyle = "#00d4ff";
+      ctx.lineWidth = 1.8;
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
-
-      // Edge label
-      const mx = (ax + bx) / 2;
-      const my = (ay + by) / 2;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
       const dx = bx - ax, dy = by - ay;
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
-      const nx = (-dy / len) * 16;
-      const ny = (dx / len) * 16;
+      const nx = (-dy / len) * 15, ny = (dx / len) * 15;
       ctx.font = "bold 11px 'Space Grotesk', sans-serif";
-      ctx.fillStyle = "#4f46e5";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#00d4ff";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(`${points[i].label}${points[j].label}`, mx + nx, my + ny);
     }
 
-    // ── Angle arcs ────────────────────────────────────────────────────────
+    // Angle arcs
     for (let i = 0; i < n; i++) {
       const prev = points[(i - 1 + n) % n];
       const curr = points[i];
       const next = points[(i + 1) % n];
-      const [cx2, cy2] = worldToCanvas(curr.x, curr.y, scale, ox, oy);
-      const [px2, py2] = worldToCanvas(prev.x, prev.y, scale, ox, oy);
-      const [nx2, ny2] = worldToCanvas(next.x, next.y, scale, ox, oy);
+      const [cx2, cy2] = w2c(curr.x, curr.y);
+      const [px2, py2] = w2c(prev.x, prev.y);
+      const [nx2, ny2] = w2c(next.x, next.y);
       const a1 = Math.atan2(py2 - cy2, px2 - cx2);
       const a2 = Math.atan2(ny2 - cy2, nx2 - cx2);
-      ctx.strokeStyle = "#a5b4fc";
+      ctx.strokeStyle = "#00d4ff44";
       ctx.lineWidth = 1.2;
-      ctx.globalAlpha = 0.7;
-      ctx.beginPath();
-      ctx.arc(cx2, cy2, 16, a1, a2, false);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      ctx.beginPath(); ctx.arc(cx2, cy2, 14, a1, a2, false); ctx.stroke();
     }
 
-    // ── Centers ───────────────────────────────────────────────────────────
-    const drawCenter = (
-      pt: Point2D | null | undefined,
-      label: string,
-      color: string,
-      visible: boolean
-    ) => {
+    // Centers
+    const drawCenter = (pt: Point2D | null | undefined, label: string, color: string, visible: boolean) => {
       if (!visible || !pt) return;
-      const [cx2, cy2] = worldToCanvas(pt.x, pt.y, scale, ox, oy);
-
+      const [cx2, cy2] = w2c(pt.x, pt.y);
       // Glow
       const grad = ctx.createRadialGradient(cx2, cy2, 2, cx2, cy2, 14);
-      grad.addColorStop(0, color + "cc");
-      grad.addColorStop(1, color + "00");
-      ctx.beginPath();
-      ctx.arc(cx2, cy2, 14, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
-      ctx.fill();
-
-      // Cross marker
-      drawCross(ctx, cx2, cy2, 8, color, 2);
-
+      grad.addColorStop(0, color + "aa"); grad.addColorStop(1, "transparent");
+      ctx.beginPath(); ctx.arc(cx2, cy2, 14, 0, Math.PI * 2);
+      ctx.fillStyle = grad; ctx.fill();
+      // Cross
+      ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(cx2 - 7, cy2); ctx.lineTo(cx2 + 7, cy2);
+      ctx.moveTo(cx2, cy2 - 7); ctx.lineTo(cx2, cy2 + 7); ctx.stroke();
       // Dot
-      ctx.beginPath();
-      ctx.arc(cx2, cy2, 4, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-
-      // Label + coordinate
-      ctx.font = "bold 12px 'Space Grotesk', sans-serif";
-      ctx.fillStyle = color;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label, cx2 + 10, cy2 - 8);
-      ctx.font = "10px 'JetBrains Mono', monospace";
-      ctx.fillStyle = color + "bb";
-      ctx.fillText(`(${pt.x.toFixed(2)}, ${pt.y.toFixed(2)})`, cx2 + 10, cy2 + 6);
+      ctx.beginPath(); ctx.arc(cx2, cy2, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+      // Label
+      ctx.font = "bold 11px 'Space Grotesk', sans-serif";
+      ctx.fillStyle = color; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+      ctx.fillText(label, cx2 + 8, cy2 - 2);
+      ctx.font = "9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = color + "99"; ctx.textBaseline = "top";
+      ctx.fillText(`(${pt.x.toFixed(2)}, ${pt.y.toFixed(2)})`, cx2 + 8, cy2 + 2);
     };
 
     if (centers) {
@@ -293,48 +217,47 @@ export default function BaseCanvas2D({
       drawCenter(centers.orthocenter, "H", CENTER_COLORS.orthocenter, centerVisibility?.orthocenter ?? false);
     }
 
-    // ── Vertices ──────────────────────────────────────────────────────────
+    // Vertices
     for (let i = 0; i < n; i++) {
-      const [vx, vy] = worldToCanvas(points[i].x, points[i].y, scale, ox, oy);
+      const [vx, vy] = w2c(points[i].x, points[i].y);
       const color = getFaceColor(i + 2);
-
-      // Shadow/glow
-      ctx.shadowColor = color + "66";
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(vx, vy, VERTEX_RADIUS, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.shadowBlur = 0;
-
-      // White border
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      // Label above
+      // Glow
+      const grd = ctx.createRadialGradient(vx, vy, 0, vx, vy, 16);
+      grd.addColorStop(0, color + "55"); grd.addColorStop(1, "transparent");
+      ctx.beginPath(); ctx.arc(vx, vy, 16, 0, Math.PI * 2);
+      ctx.fillStyle = grd; ctx.fill();
+      // Dot
+      ctx.beginPath(); ctx.arc(vx, vy, VERTEX_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = "#0a0e1a"; ctx.lineWidth = 2; ctx.stroke();
+      // Label
       ctx.font = "bold 13px 'Space Grotesk', sans-serif";
-      ctx.fillStyle = "#1e293b";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(points[i].label, vx, vy - VERTEX_RADIUS - 11);
-
-      // Coordinate below
-      ctx.font = "10px 'JetBrains Mono', monospace";
-      ctx.fillStyle = "#94a3b8";
-      ctx.fillText(
-        `(${points[i].x.toFixed(1)}, ${points[i].y.toFixed(1)})`,
-        vx, vy + VERTEX_RADIUS + 11
-      );
+      ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+      ctx.fillText(points[i].label, vx, vy - VERTEX_RADIUS - 6);
+      // Coords
+      ctx.font = "9px 'JetBrains Mono', monospace";
+      ctx.fillStyle = "#3d5070"; ctx.textBaseline = "top";
+      ctx.fillText(`(${points[i].x.toFixed(1)}, ${points[i].y.toFixed(1)})`, vx, vy + VERTEX_RADIUS + 4);
     }
-  }, [points, showGrid, centers, centerVisibility, width, height]);
+  }, [points, showGrid, centers, centerVisibility]);
 
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver(() => {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      computeTransform();
+      draw();
+    });
+    ro.observe(canvas);
+    canvas.width = canvas.offsetWidth || 600;
+    canvas.height = canvas.offsetHeight || 480;
     computeTransform();
     draw();
+    return () => ro.disconnect();
   }, [computeTransform, draw]);
 
-  // ── Drag handlers ─────────────────────────────────────────────────────────
   const getPos = (e: React.MouseEvent | React.TouchEvent): [number, number] => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
@@ -348,11 +271,9 @@ export default function BaseCanvas2D({
   };
 
   const hitTest = (cx: number, cy: number): number => {
-    const scale = scaleRef.current;
-    const [ox, oy] = originRef.current;
     for (let i = 0; i < points.length; i++) {
-      const [vx, vy] = worldToCanvas(points[i].x, points[i].y, scale, ox, oy);
-      if (Math.sqrt((cx - vx) ** 2 + (cy - vy) ** 2) <= DRAG_HIT) return i;
+      const [vx, vy] = w2c(points[i].x, points[i].y);
+      if (Math.hypot(cx - vx, cy - vy) <= DRAG_HIT) return i;
     }
     return -1;
   };
@@ -362,14 +283,12 @@ export default function BaseCanvas2D({
   return (
     <canvas
       ref={canvasRef}
-      width={width}
-      height={height}
       style={{ width: "100%", height: "100%", display: "block", cursor: "crosshair" }}
       onMouseDown={(e) => { dragIdx.current = hitTest(...getPos(e)); }}
       onMouseMove={(e) => {
         if (dragIdx.current < 0 || !onPointMove) return;
         const [cx, cy] = getPos(e);
-        const [wx, wy] = canvasToWorld(cx, cy, scaleRef.current, originRef.current[0], originRef.current[1]);
+        const [wx, wy] = c2w(cx, cy);
         onPointMove(dragIdx.current, snap(wx), snap(wy));
       }}
       onMouseUp={() => { dragIdx.current = -1; }}
@@ -379,7 +298,7 @@ export default function BaseCanvas2D({
         e.preventDefault();
         if (dragIdx.current < 0 || !onPointMove) return;
         const [cx, cy] = getPos(e);
-        const [wx, wy] = canvasToWorld(cx, cy, scaleRef.current, originRef.current[0], originRef.current[1]);
+        const [wx, wy] = c2w(cx, cy);
         onPointMove(dragIdx.current, snap(wx), snap(wy));
       }}
       onTouchEnd={() => { dragIdx.current = -1; }}

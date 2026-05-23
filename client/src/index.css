@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "katex/dist/katex.min.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -42,56 +43,55 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* ── Deep Tech Dark Theme ─────────────────────────────────────────────────────
+ * Background:  #0a0e1a  (deep navy)
+ * Panel:       #0f1629
+ * Card:        #141d35
+ * Input:       #1a2540
+ * Accent:      #00d4ff  (cyan)
+ * Value:       #ffb800  (amber)
+ * Success:     #00ff9d  (green)
+ * Error:       #ff4466  (rose)
+ * Fonts:       Space Grotesk (UI) + JetBrains Mono (values)
+ * ─────────────────────────────────────────────────────────────────────────── */
+
 :root {
-  /* Elegant White Tech Theme */
   --radius: 0.5rem;
-
-  --background: oklch(0.98 0.002 240);
-  --foreground: oklch(0.15 0.015 240);
-
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.015 240);
-
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.015 240);
-
-  /* Primary: deep indigo-blue */
-  --primary: oklch(0.38 0.18 265);
-  --primary-foreground: oklch(0.98 0.002 240);
-
-  /* Secondary: light silver */
-  --secondary: oklch(0.94 0.004 240);
-  --secondary-foreground: oklch(0.3 0.015 240);
-
-  --muted: oklch(0.95 0.003 240);
-  --muted-foreground: oklch(0.52 0.015 240);
-
-  /* Accent: electric blue */
-  --accent: oklch(0.55 0.22 265);
-  --accent-foreground: oklch(0.98 0 0);
-
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-
-  --border: oklch(0.88 0.006 240);
-  --input: oklch(0.92 0.004 240);
-  --ring: oklch(0.55 0.22 265);
-
-  --chart-1: oklch(0.55 0.22 265);
-  --chart-2: oklch(0.65 0.18 200);
-  --chart-3: oklch(0.7 0.15 160);
-  --chart-4: oklch(0.75 0.18 80);
-  --chart-5: oklch(0.6 0.2 30);
-
-  --sidebar: oklch(0.97 0.003 240);
-  --sidebar-foreground: oklch(0.15 0.015 240);
-  --sidebar-primary: oklch(0.38 0.18 265);
-  --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.93 0.006 240);
-  --sidebar-accent-foreground: oklch(0.15 0.015 240);
-  --sidebar-border: oklch(0.88 0.006 240);
-  --sidebar-ring: oklch(0.55 0.22 265);
+  --background: oklch(0.08 0.02 260);
+  --foreground: oklch(0.92 0.01 220);
+  --card: oklch(0.11 0.025 260);
+  --card-foreground: oklch(0.92 0.01 220);
+  --popover: oklch(0.11 0.025 260);
+  --popover-foreground: oklch(0.92 0.01 220);
+  --primary: oklch(0.72 0.18 200);
+  --primary-foreground: oklch(0.05 0.02 260);
+  --secondary: oklch(0.14 0.03 260);
+  --secondary-foreground: oklch(0.75 0.01 220);
+  --muted: oklch(0.14 0.025 260);
+  --muted-foreground: oklch(0.55 0.015 240);
+  --accent: oklch(0.72 0.18 200);
+  --accent-foreground: oklch(0.05 0.02 260);
+  --destructive: oklch(0.65 0.22 15);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.18 0.03 255);
+  --input: oklch(0.15 0.03 260);
+  --ring: oklch(0.72 0.18 200);
+  --chart-1: oklch(0.72 0.18 200);
+  --chart-2: oklch(0.82 0.18 140);
+  --chart-3: oklch(0.78 0.18 60);
+  --chart-4: oklch(0.65 0.22 15);
+  --chart-5: oklch(0.65 0.22 290);
+  --sidebar: oklch(0.10 0.025 260);
+  --sidebar-foreground: oklch(0.92 0.01 220);
+  --sidebar-primary: oklch(0.72 0.18 200);
+  --sidebar-primary-foreground: oklch(0.05 0.02 260);
+  --sidebar-accent: oklch(0.14 0.03 260);
+  --sidebar-accent-foreground: oklch(0.92 0.01 220);
+  --sidebar-border: oklch(0.18 0.03 255);
+  --sidebar-ring: oklch(0.72 0.18 200);
 }
+
+/* No .dark variant needed — we're always dark */
 
 @layer base {
   * {
@@ -99,7 +99,8 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -122,40 +123,117 @@
     padding-left: 1rem;
     padding-right: 1rem;
   }
-
   .flex {
     min-height: 0;
     min-width: 0;
   }
-
   @media (min-width: 640px) {
-    .container {
-      padding-left: 1.5rem;
-      padding-right: 1.5rem;
-    }
+    .container { padding-left: 1.5rem; padding-right: 1.5rem; }
   }
-
   @media (min-width: 1024px) {
-    .container {
-      padding-left: 2rem;
-      padding-right: 2rem;
-      max-width: 1280px;
-    }
+    .container { padding-left: 2rem; padding-right: 2rem; max-width: 1280px; }
+  }
+
+  /* ── Tech input ── */
+  .tech-input {
+    background: #1a2540 !important;
+    border-color: #1e2d4a !important;
+    color: #e8f0ff !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 12px !important;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .tech-input:focus {
+    border-color: #00d4ff !important;
+    box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15) !important;
+    outline: none !important;
+  }
+  .tech-input::placeholder {
+    color: #3d5070 !important;
+  }
+
+  /* ── Cyan button ── */
+  .btn-cyan {
+    background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+    color: #000d1a;
+    font-weight: 700;
+    border: none;
+    box-shadow: 0 0 16px rgba(0, 212, 255, 0.25);
+    transition: all 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .btn-cyan:hover:not(:disabled) {
+    box-shadow: 0 0 24px rgba(0, 212, 255, 0.4);
+    transform: translateY(-1px);
+  }
+  .btn-cyan:active:not(:disabled) {
+    transform: scale(0.97);
+    box-shadow: 0 0 8px rgba(0, 212, 255, 0.2);
   }
 }
 
-/* Custom scrollbar for elegant look */
-::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+/* ── Shadcn/Radix overrides for dark theme ── */
+[data-radix-select-content],
+[role="listbox"] {
+  background: #141d35 !important;
+  border: 1px solid #1e2d4a !important;
+  color: #e8f0ff !important;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+[data-radix-select-item]:hover,
+[data-radix-select-item][data-highlighted] {
+  background: #1e2d4a !important;
+  color: #00d4ff !important;
 }
-::-webkit-scrollbar-thumb {
-  background: oklch(0.75 0.01 240);
-  border-radius: 2px;
+[data-radix-tabs-trigger] {
+  color: #8899bb;
+  font-size: 11px;
+  font-weight: 600;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.55 0.22 265);
+[data-radix-tabs-trigger][data-state="active"] {
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.1);
+}
+[data-radix-tooltip-content] {
+  background: #141d35 !important;
+  border: 1px solid #1e2d4a !important;
+  color: #e8f0ff !important;
+  font-size: 11px !important;
+}
+
+/* ── KaTeX dark theme overrides ── */
+.katex {
+  color: #e8f0ff;
+  font-size: 1em;
+}
+.katex .mord,
+.katex .mop,
+.katex .mrel,
+.katex .mbin,
+.katex .mpunct,
+.katex .mopen,
+.katex .mclose {
+  color: #e8f0ff;
+}
+.katex .textbf {
+  color: #00d4ff;
+  font-weight: 700;
+}
+/* Highlight numbers in amber */
+.katex .mord.mathnormal + .mord {
+  color: #ffb800;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #0a0e1a; }
+::-webkit-scrollbar-thumb { background: #1e2d4a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #263554; }
+
+/* ── Selection ── */
+::selection { background: rgba(0, 212, 255, 0.2); color: #e8f0ff; }
+
+/* ── Input number spinners ── */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.3;
+  filter: invert(1);
 }

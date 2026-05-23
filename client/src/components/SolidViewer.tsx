@@ -94,11 +94,11 @@ export default function SolidViewer({
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf8fafc);
+    scene.background = new THREE.Color(0x0a0e1a);
     sceneRef.current = scene;
 
     // Subtle grid
-    const grid = new THREE.GridHelper(24, 24, 0xdde1e7, 0xeef0f4);
+    const grid = new THREE.GridHelper(24, 24, 0x1e2d4a, 0x141d35);
     scene.add(grid);
 
     const w = mount.clientWidth || 600;
@@ -120,14 +120,17 @@ export default function SolidViewer({
     controls.dampingFactor = 0.06;
     controlsRef.current = controls;
 
-    // Lighting for elegant look
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const dir1 = new THREE.DirectionalLight(0xffffff, 0.9);
+    // Lighting for dark tech look
+    scene.add(new THREE.AmbientLight(0x1a2a4a, 1.2));
+    const dir1 = new THREE.DirectionalLight(0x00d4ff, 0.8);
     dir1.position.set(15, 20, 10);
     scene.add(dir1);
-    const dir2 = new THREE.DirectionalLight(0xc7d2fe, 0.4);
+    const dir2 = new THREE.DirectionalLight(0xffffff, 0.5);
     dir2.position.set(-10, 5, -8);
     scene.add(dir2);
+    const dir3 = new THREE.DirectionalLight(0x00ff9d, 0.2);
+    dir3.position.set(0, -10, 0);
+    scene.add(dir3);
 
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate);
@@ -250,9 +253,9 @@ export default function SolidViewer({
       const offset = 0.3;
       const sprite = makeTextSprite(
         face.name,
-        highlighted ? color : "#334155",
+        highlighted ? color : "#00d4ff",
         highlighted ? 26 : 20,
-        highlighted ? 0.85 : 0.6
+        highlighted ? 0.85 : 0.5
       );
       sprite.position.set(
         tp.x + n.x * offset,
@@ -281,13 +284,13 @@ export default function SolidViewer({
       const tp = toThree(pos);
       // Small sphere at vertex
       const sphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.1, 12, 12),
-        new THREE.MeshPhongMaterial({ color: 0x334155 })
+        new THREE.SphereGeometry(0.12, 12, 12),
+        new THREE.MeshPhongMaterial({ color: 0x00d4ff, emissive: 0x003344 })
       );
       sphere.position.copy(tp);
       group.add(sphere);
 
-      const sprite = makeTextSprite(label, "#1e293b", 28);
+      const sprite = makeTextSprite(label, "#00d4ff", 28);
       sprite.position.set(tp.x, tp.y + 0.5, tp.z);
       sprite.scale.set(0.9, 0.9, 1);
       group.add(sprite);
